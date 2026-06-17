@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FileMaker XML Scrubber</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#f7f6f2; --surface:#ffffff; --ink:#1a1916; --ink-2:#4a4843; --ink-3:#8a8780;
+    --line:#e2e0d8; --line-2:#cccab8; --brand:#c94a1e; --brand-dk:#a33a14; --brand-lt:#faecea;
+    --good:#1e7a48; --good-lt:#e8f5ee; --warn:#9a6200; --warn-lt:#fff8e6;
+    --mono:'JetBrains Mono','Fira Mono',ui-monospace,monospace;
+    --sans:'Inter','DM Sans',ui-sans-serif,system-ui,sans-serif;
+    --r:6px; --r-lg:10px;
+  }
+  @media (prefers-color-scheme:dark) {
+    :root {
+      --bg:#191918; --surface:#242422; --ink:#f0eeea; --ink-2:#b8b6b0; --ink-3:#6e6c66;
+      --line:#333330; --line-2:#444440; --brand:#e8613a; --brand-dk:#f07050; --brand-lt:#2a1a14;
+      --good:#3aaa6a; --good-lt:#0e2418; --warn:#d4a030; --warn-lt:#241c08;
+    }
+  }
+  html,body { height:100%; }
+  body { font-family:var(--sans); background:var(--bg); color:var(--ink); font-size:14px; line-height:1.6; height:100vh; overflow:hidden; display:flex; flex-direction:column; }
+  header { padding:20px 28px 18px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:baseline; gap:14px; }
+  .logo { font-size:15px; font-weight:600; color:var(--ink); letter-spacing:-0.01em; }
+  .logo span { color:var(--brand); }
+  .tagline { font-size:12px; color:var(--ink-3); }
+  main { flex:1; display:grid; grid-template-columns:1fr 1fr; min-height:0; }
+  .panel { display:flex; flex-direction:column; border-right:1px solid var(--line); min-height:0; }
+  .panel:last-child { border-right:none; }
+  .panel-header { padding:14px 20px 12px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+  .panel-title { font-size:11px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.08em; }
+  .drop-zone { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:40px 28px; border:2px dashed var(--line-2); border-radius:var(--r-lg); margin:20px; cursor:pointer; transition:border-color .15s,background .15s; }
+  .drop-zone:hover,.drop-zone.drag-over { border-color:var(--brand); background:var(--brand-lt); }
+  .drop-icon { width:40px; height:40px; color:var(--ink-3); }
+  .drop-zone:hover .drop-icon,.drop-zone.drag-over .drop-icon { color:var(--brand); }
+  .drop-label { font-size:13px; color:var(--ink-2); text-align:center; }
+  .drop-label strong { color:var(--ink); font-weight:500; }
+  .drop-sub { font-size:11px; color:var(--ink-3); }
+  .btn-choose { padding:7px 16px; border:1px solid var(--line-2); border-radius:var(--r); background:var(--surface); color:var(--ink-2); font-size:12px; font-family:var(--sans); cursor:pointer; }
+  .btn-choose:hover { border-color:var(--brand); color:var(--brand); }
+  #file-input { display:none; }
+  .settings-collapse { flex-shrink:0; overflow:hidden; }
+  .settings-collapse.open { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .settings-summary { padding:14px 20px 12px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none; flex-shrink:0; }
+  .settings-chevron { transition:transform .15s; color:var(--ink-3); }
+  .settings-collapse.open .settings-chevron { transform:rotate(180deg); }
+  .settings-body { display:none; flex:1; overflow-y:auto; padding:16px 20px; min-height:0; }
+  .settings-collapse.open .settings-body { display:block; flex:1; overflow-y:auto; }
+  .pattern-group { margin-bottom:20px; }
+  .pattern-group-label { font-size:10px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.07em; margin-bottom:8px; }
+  .pattern-row { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--line); }
+  .pattern-row:last-child { border-bottom:none; }
+  .pattern-toggle { width:32px; height:18px; flex-shrink:0; appearance:none; -webkit-appearance:none; background:var(--line-2); border-radius:9px; cursor:pointer; position:relative; transition:background .15s; }
+  .pattern-toggle:checked { background:var(--brand); }
+  .pattern-toggle::after { content:''; position:absolute; width:14px; height:14px; border-radius:50%; background:#fff; top:2px; left:2px; transition:transform .15s; }
+  .pattern-toggle:checked::after { transform:translateX(14px); }
+  .pattern-name { font-family:var(--mono); font-size:11px; color:var(--ink); flex:1; }
+  .pattern-desc { font-size:11px; color:var(--ink-3); }
+  .custom-pattern-row { display:flex; gap:6px; margin-top:10px; }
+  .custom-input { flex:1; padding:6px 10px; border:1px solid var(--line-2); border-radius:var(--r); background:var(--surface); color:var(--ink); font-family:var(--mono); font-size:12px; }
+  .custom-input:focus { outline:none; border-color:var(--brand); }
+  .btn-add { padding:6px 12px; border:1px solid var(--brand); border-radius:var(--r); background:transparent; color:var(--brand); font-size:12px; font-family:var(--sans); cursor:pointer; white-space:nowrap; }
+  .btn-add:hover { background:var(--brand-lt); }
+  .custom-tag { display:inline-flex; align-items:center; gap:4px; padding:3px 8px 3px 10px; background:var(--brand-lt); border:1px solid var(--brand); border-radius:var(--r); font-family:var(--mono); font-size:11px; color:var(--brand); margin:4px 4px 0 0; }
+  .custom-tag-remove { background:none; border:none; color:var(--brand); cursor:pointer; padding:0; font-size:14px; line-height:1; opacity:.7; }
+  .custom-tag-remove:hover { opacity:1; }
+  #custom-tags { margin-top:6px; }
+  .results-body { flex:1; overflow-y:auto; }
+  .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:8px; padding:40px 28px; color:var(--ink-3); font-size:13px; text-align:center; }
+  .finding { border-bottom:1px solid var(--line); padding:12px 20px; }
+  .finding:last-child { border-bottom:none; }
+  .finding-meta { display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap; }
+  .badge { display:inline-block; padding:2px 7px; border-radius:4px; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
+  .badge-high   { background:#fdecea; color:#a0281c; }
+  .badge-medium { background:#fff3cd; color:#7a4c00; }
+  @media (prefers-color-scheme:dark) {
+    .badge-high   { background:#2a0e0c; color:#f08070; }
+    .badge-medium { background:#201808; color:#d4a040; }
+  }
+  .finding-kind { font-size:11px; color:var(--ink-3); font-weight:500; }
+  .finding-location { font-size:11px; color:var(--ink-3); margin-left:auto; }
+  .finding-preview { font-family:var(--mono); font-size:11px; color:var(--ink-2); background:var(--bg); border:1px solid var(--line); border-radius:var(--r); padding:6px 10px; margin-top:6px; word-break:break-all; white-space:pre-wrap; max-height:60px; overflow:hidden; }
+  .finding-note { font-size:11px; color:var(--ink-3); margin-top:4px; }
+  footer { padding:12px 20px; border-top:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0; }
+  .status-text { font-size:12px; color:var(--ink-3); flex:1; }
+  .status-count { font-weight:600; color:var(--brand); }
+  .status-ok { color:var(--good); }
+  .btn { padding:8px 16px; border-radius:var(--r); font-size:12px; font-family:var(--sans); cursor:pointer; border:1px solid var(--line-2); background:transparent; color:var(--ink-2); }
+  .btn:hover { border-color:var(--ink-3); }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .btn-primary { border:none; background:var(--brand); color:#fff; font-size:13px; font-weight:500; display:flex; align-items:center; gap:7px; }
+  .btn-primary:hover { background:var(--brand-dk); }
+  .btn-primary:disabled { background:var(--line-2); color:var(--ink-3); }
+  .loaded-header { display:flex; flex-direction:column; gap:2px; padding:14px 20px; border-bottom:1px solid var(--line); background:var(--surface); flex-shrink:0; }
+  .loaded-filename { font-size:13px; font-weight:500; color:var(--ink); }
+  .loaded-meta { font-size:11px; color:var(--ink-3); }
+  .summary-bar { padding:10px 20px; border-bottom:1px solid var(--line); background:var(--bg); display:flex; gap:20px; flex-shrink:0; }
+  .summary-stat { display:flex; flex-direction:column; gap:1px; }
+  .summary-stat-val { font-size:18px; font-weight:600; color:var(--ink); line-height:1; }
+  .summary-stat-val.red { color:var(--brand); }
+  .summary-stat-label { font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.06em; }
+  .section-header { padding:8px 20px; font-size:10px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:.07em; background:var(--bg); border-bottom:1px solid var(--line); position:sticky; top:0; }
+  .no-file-prompt { padding:24px 20px; font-size:12px; color:var(--ink-3); text-align:center; }
+  /* intensity toggle */
+  .intensity-row { display:flex; align-items:center; gap:10px; padding:8px 0; }
+  .intensity-label { font-size:11px; color:var(--ink-2); flex:1; }
+  .intensity-pills { display:flex; gap:4px; }
+  .pill { padding:3px 10px; border-radius:99px; border:1px solid var(--line-2); background:transparent; font-size:11px; color:var(--ink-3); cursor:pointer; font-family:var(--sans); }
+  .pill.active { background:var(--brand); border-color:var(--brand); color:#fff; }
+  /* summary overlay */
+  .summary-overlay { position:absolute; inset:0; background:var(--surface); z-index:10; overflow-y:auto; padding:24px 28px; display:flex; flex-direction:column; gap:16px; }
+  .summary-overlay-title { font-size:15px; font-weight:600; color:var(--ink); display:flex; align-items:center; gap:8px; }
+  .summary-ok-icon { color:var(--good); }
+  .summary-section-label { font-size:10px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:.07em; margin-bottom:6px; }
+  .summary-category-row { display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--line); font-size:12px; color:var(--ink-2); }
+  .summary-category-row:last-child { border-bottom:none; }
+  .summary-count { font-weight:600; color:var(--ink); }
+  .summary-lines-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .summary-line-stat { background:var(--bg); border:1px solid var(--line); border-radius:var(--r); padding:10px 14px; }
+  .summary-line-val { font-size:20px; font-weight:600; color:var(--ink); }
+  .summary-line-label { font-size:11px; color:var(--ink-3); }
+  .summary-match-badge { display:inline-block; padding:2px 8px; border-radius:var(--r); background:var(--good-lt); color:var(--good); font-size:11px; font-weight:600; }
+  #right-panel { position:relative; }
+  .copied-flash { color:var(--good) !important; }
+  .disclaimer { flex-shrink:0; padding:9px 20px; border-top:1px solid var(--line); background:var(--bg); font-size:11px; color:var(--ink-3); line-height:1.45; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">FileMaker XML <span>Scrubber</span></div>
+  <div class="tagline">Strip credentials from FileMaker XML before sharing with AI tools</div>
+</header>
+
+<main>
+  <div class="panel" id="left-panel">
+    <div class="panel-header">
+      <span class="panel-title">Input</span>
+      <button class="btn" id="btn-clear" style="display:none" onclick="clearFile()">Clear</button>
+    </div>
+
+    <div class="drop-zone" id="drop-zone"
+         onclick="document.getElementById('file-input').click()"
+         ondragover="handleDragOver(event)" ondragleave="handleDragLeave()" ondrop="handleDrop(event)">
+      <svg class="drop-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M26 6H10a3 3 0 0 0-3 3v22a3 3 0 0 0 3 3h20a3 3 0 0 0 3-3V14z"/>
+        <path d="M26 6v8a1 1 0 0 0 1 1h6"/><path d="M16 24l4-4 4 4M20 20v10"/>
+      </svg>
+      <div class="drop-label"><strong>Drop an XML file here</strong><br>or click to choose</div>
+      <div class="drop-sub">FileMaker DDR XML, script XML, clipboard exports</div>
+      <button class="btn-choose" onclick="event.stopPropagation();document.getElementById('file-input').click()">Choose file</button>
+      <input type="file" id="file-input" accept=".xml,text/xml,application/xml" onchange="handleFileInput(event)">
+    </div>
+
+    <div id="loaded-info" style="display:none;flex:1;flex-direction:column;min-height:0;overflow:hidden;">
+      <div class="loaded-header">
+        <div class="loaded-filename" id="loaded-filename"></div>
+        <div class="loaded-meta" id="loaded-meta"></div>
+      </div>
+      <div id="settings-collapse" class="settings-collapse">
+        <div class="settings-summary" onclick="toggleSettings()" style="border-top:1px solid var(--line);">
+          <span class="panel-title">Detection settings</span>
+          <svg class="settings-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5l3 3 3-3"/></svg>
+        </div>
+        <div class="settings-body">
+
+        <div class="pattern-group">
+          <div class="pattern-group-label">Scan intensity</div>
+          <div class="intensity-row">
+            <span class="intensity-label">Match threshold</span>
+            <div class="intensity-pills">
+              <button class="pill" id="pill-strict" onclick="setIntensity('strict')">Strict</button>
+              <button class="pill active" id="pill-normal" onclick="setIntensity('normal')">Normal</button>
+              <button class="pill" id="pill-aggressive" onclick="setIntensity('aggressive')">Aggressive</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pattern-group">
+          <div class="pattern-group-label">Known API key formats</div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-skkey" checked>
+            <span class="pattern-name">sk- / sk-proj-</span>
+            <span class="pattern-desc">OpenAI keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-aikey" checked>
+            <span class="pattern-name">AIza...</span>
+            <span class="pattern-desc">Google AI keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-xaikey" checked>
+            <span class="pattern-name">xai- / gsk_</span>
+            <span class="pattern-desc">xAI / Groq keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-awskey" checked>
+            <span class="pattern-name">AKIA / ASIA</span>
+            <span class="pattern-desc">AWS access keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-ghkey" checked>
+            <span class="pattern-name">ghp_ / github_pat_</span>
+            <span class="pattern-desc">GitHub tokens</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-slackkey" checked>
+            <span class="pattern-name">xoxb- / xoxp-</span>
+            <span class="pattern-desc">Slack tokens</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-stripekey" checked>
+            <span class="pattern-name">sk_live_ / rk_live_</span>
+            <span class="pattern-desc">Stripe live keys</span>
+          </div>
+        </div>
+
+        <div class="pattern-group">
+          <div class="pattern-group-label">Variable / attribute names</div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-apikey" checked>
+            <span class="pattern-name">api_key / apikey</span>
+            <span class="pattern-desc">REST API keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-token" checked>
+            <span class="pattern-name">token / bearer</span>
+            <span class="pattern-desc">Auth tokens, JWTs</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-password" checked>
+            <span class="pattern-name">password / passwd</span>
+            <span class="pattern-desc">Passwords</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-secret" checked>
+            <span class="pattern-name">secret</span>
+            <span class="pattern-desc">OAuth secrets, HMAC keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-smtp" checked>
+            <span class="pattern-name">smtp_pass / smtp_key</span>
+            <span class="pattern-desc">Mail credentials</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-privatekey" checked>
+            <span class="pattern-name">private_key / auth_key</span>
+            <span class="pattern-desc">Private / signing keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-credential" checked>
+            <span class="pattern-name">credential / oauth</span>
+            <span class="pattern-desc">OAuth credentials</span>
+          </div>
+        </div>
+
+        <div class="pattern-group">
+          <div class="pattern-group-label">Inline patterns</div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-inline" checked>
+            <span class="pattern-name">keyword = "value"</span>
+            <span class="pattern-desc">Assigned literals</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-connstr" checked>
+            <span class="pattern-name">password= / pwd=</span>
+            <span class="pattern-desc">Connection strings</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-urlhost" checked>
+            <span class="pattern-name">https://hostname/...</span>
+            <span class="pattern-desc">Internal URLs → https://[HOST]/...</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-textnode" checked>
+            <span class="pattern-name">&lt;Text&gt; nodes</span>
+            <span class="pattern-desc">Raw string parameters in steps</span>
+          </div>
+        </div>
+
+        <div class="pattern-group">
+          <div class="pattern-group-label">Custom keywords</div>
+          <div class="custom-pattern-row">
+            <input type="text" class="custom-input" id="custom-input" placeholder="e.g. myCompanyKey" maxlength="60">
+            <button class="btn-add" onclick="addCustomPattern()">Add</button>
+          </div>
+          <div id="custom-tags"></div>
+        </div>
+
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="right-panel">
+    <div class="panel-header">
+      <span class="panel-title">Findings</span>
+    </div>
+    <div class="results-body" id="results-body">
+      <div class="no-file-prompt">Load an XML file to scan</div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="status-text" id="status-text">No file loaded</div>
+  <button class="btn" id="btn-rescan" style="display:none" onclick="runScan()">Rescan</button>
+  <button class="btn" id="btn-copy" style="display:none" onclick="doCopy()">Copy XML</button>
+  <button class="btn btn-primary" id="btn-strip" disabled onclick="doStrip()">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 7h10M7 2l5 5-5 5"/></svg>
+    Download redacted XML
+  </button>
+</footer>
+<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.0 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
+
+<script>
+// ============================================================
+//  FileMaker XML Scrubber — engine + UI
+//  Engine functions below are unit-tested under jsdom.
+//  Findings are DERIVED from what is actually redacted, so the
+//  on-screen count and the downloaded file can never disagree.
+// ============================================================
+
+var state = {
+    rawText:null, fileName:null, doc:null,
+    findings:[], customKws:[], lastSummary:null,
+    intensity:'normal', lastRun:null, lastRedactedXml:null,
+};
+
+function $(id){ return document.getElementById(id); }
+
+// ── ENGINE ───────────────────────────────────────────────────
+function escapeRe(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+
+function buildKnownKeyRe(o){
+    var p=[];
+    if(o.sk)     p.push('sk-proj-[\\w-]{10,}','sk-[\\w-]{20,}');     // OpenAI (also catches sk-ant- Anthropic)
+    if(o.aiza)   p.push('AIza[\\w-]{30,}');                          // Google
+    if(o.xai)    p.push('xai-[\\w-]{10,}');                          // xAI
+    if(o.groq)   p.push('gsk_[A-Za-z0-9]{20,}');                     // Groq
+    if(o.aws)    p.push('AKIA[0-9A-Z]{16}','ASIA[0-9A-Z]{16}');      // AWS access key id
+    if(o.github) p.push('gh[posru]_[A-Za-z0-9]{20,}','github_pat_[A-Za-z0-9_]{20,}');
+    if(o.slack)  p.push('xox[baprs]-[A-Za-z0-9-]{10,}');
+    if(o.stripe) p.push('[sr]k_live_[A-Za-z0-9]{20,}');
+    return p.length ? new RegExp(p.join('|')) : null;
+}
+
+function kwPartsFrom(a){
+    var p=[];
+    if(a.apikey)     p.push('api[_-]?key','apikey');
+    if(a.token)      p.push('token','bearer');
+    if(a.password)   p.push('password','passwd');
+    if(a.secret)     p.push('secret');
+    if(a.smtp)       p.push('smtp[_-]?pass','smtp[_-]?key');
+    if(a.privatekey) p.push('private[_-]?key','auth[_-]?key');
+    if(a.credential) p.push('credential','oauth');
+    (a.custom||[]).forEach(function(c){ p.push(escapeRe(c)); });
+    return p;
+}
+
+function categFromName(name){
+    var n=(name||'').toLowerCase();
+    if(/api[_-]?key|apikey/.test(n)) return 'api_key';
+    if(/token|bearer/.test(n))       return 'token';
+    if(/password|passwd/.test(n))    return 'password';
+    if(/secret/.test(n))             return 'secret';
+    if(/smtp/.test(n))               return 'smtp';
+    if(/oauth/.test(n))              return 'oauth';
+    return 'credential';
+}
+
+function excerpt(b){ var s=(b||'').trim().replace(/\s+/g,' '); return s.length>220?s.slice(0,217)+'\u2026':s; }
+// Build a preview from the REDACTED text: short windows around each marker, so
+// findings show what was redacted (secret masked), not the start of the calc,
+// which is often a documentation comment.
+function previewRedactions(text, maxWins){
+    maxWins=maxWins||2;
+    var re=/\[REDACTED\]|\[HOST\]/g, marks=[], m;
+    while((m=re.exec(text))!==null) marks.push([m.index, m.index+m[0].length]);
+    if(marks.length===0) return excerpt(text);
+    var wins=[];
+    for(var i=0;i<marks.length && i<maxWins;i++){
+        var a=Math.max(0, marks[i][0]-36), e=Math.min(text.length, marks[i][1]+36);
+        wins.push((a>0?'\u2026':'')+text.slice(a,e).replace(/\s+/g,' ').trim()+(e<text.length?'\u2026':''));
+    }
+    var more=marks.length>maxWins ? '   (+'+(marks.length-maxWins)+' more)' : '';
+    return wins.join('     ')+more;
+}
+function isBareString(t){ t=(t||'').trim(); return /^"([^"\\]|\\.)*"$/.test(t)||/^'([^'\\]|\\.)*'$/.test(t); }
+function dominantCat(cats){ for(var i=0;i<cats.length;i++){ if(cats[i]!=='url') return cats[i]; } return cats[0]||'credential'; }
+function noteFromCats(cats){
+    var hasKey=cats.some(function(c){return c!=='url';}), hasUrl=cats.indexOf('url')!==-1;
+    if(hasKey&&hasUrl) return 'Credential literal and internal host redacted';
+    if(hasUrl) return 'Internal hostname or IP replaced with [HOST]';
+    return 'Credential value redacted';
+}
+function nm(el){ var n=el.getAttribute && el.getAttribute('name'); return n?' ['+n+']':''; }
+
+function locationOf(el){
+    var parts=[], n=el.parentNode, depth=0;
+    while(n && n.nodeType===1 && depth<10){
+        var tag=n.tagName, name=n.getAttribute('name')||'';
+        if(name) parts.unshift(tag+'['+name+']');
+        else if(['Script','Step','Field','Layout','CustomFunction'].indexOf(tag)!==-1) parts.unshift(tag);
+        n=n.parentNode; depth++;
+    }
+    return parts.slice(-3).join(' \u203a ');
+}
+
+// Split FileMaker calc text into code and comment spans, so the credential
+// passes can skip documentation. Recognises /* */ and // comments, and ignores
+// comment markers that appear inside string literals.
+function splitComments(text){
+    var spans=[], cur='', mode='code', inStr=false, q='', esc=false, i=0, n=text.length;
+    function flush(type){ if(cur!=='') spans.push({type:type,text:cur}); cur=''; }
+    while(i<n){
+        var c=text[i], c2=text[i+1];
+        if(mode==='code'){
+            if(inStr){ cur+=c; if(esc) esc=false; else if(c==='\\') esc=true; else if(c===q) inStr=false; i++; continue; }
+            if(c==='"'||c==="'"){ inStr=true; q=c; cur+=c; i++; continue; }
+            if(c==='/'&&c2==='*'){ flush('code'); cur='/*'; mode='block'; i+=2; continue; }
+            if(c==='/'&&c2==='/'){ flush('code'); cur='//'; mode='line'; i+=2; continue; }
+            cur+=c; i++; continue;
+        }
+        if(mode==='block'){ if(c==='*'&&c2==='/'){ cur+='*/'; flush('comment'); mode='code'; i+=2; continue; } cur+=c; i++; continue; }
+        if(c==='\n'||c==='\r'){ flush('comment'); cur=c; mode='code'; i++; continue; }
+        cur+=c; i++; continue;
+    }
+    flush(mode==='code'?'code':'comment');
+    return spans;
+}
+
+function isPrivateIp(ip){
+    var p=ip.split('.').map(Number);
+    if(p.length!==4 || p.some(function(x){return isNaN(x)||x>255;})) return false;
+    return (p[0]===10)||(p[0]===127)||(p[0]===192&&p[1]===168)||(p[0]===172&&p[1]>=16&&p[1]<=31)||(p[0]===169&&p[1]===254)||(p[0]===100&&p[1]>=64&&p[1]<=127);
+}
+
+// Only internal-looking hosts are redacted: private IPs, single-label hosts
+// (http://server1/), and internal-style TLDs. Public domains are left alone.
+function isInternalHost(host){
+    if(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return isPrivateIp(host);
+    if(host.indexOf('.')===-1) return true;
+    return /\.(local|internal|lan|intranet|corp|home|test|example|invalid)$/i.test(host);
+}
+
+// Redact credential literals inside one calculation string. Returns { text, count, cats }.
+function redactCalcText(txt, knownKeyRe, kwParts, doUrl){
+    var count=0, cats=[];
+
+    // Known key formats run across the WHOLE text, comments included. Near-zero
+    // false positives, and a real key pasted into a comment is still a leak.
+    var base=txt;
+    if(knownKeyRe){
+        base=base.replace(/"([^"]*)"/g,function(m,inner){ if(knownKeyRe.test(inner)){count++;cats.push('api_key');return '"[REDACTED]"';} return m; });
+        base=base.replace(/'([^']*)'/g,function(m,inner){ if(knownKeyRe.test(inner)){count++;cats.push('api_key');return "'[REDACTED]'";} return m; });
+    }
+
+    // Keyword assignments and host/IP redaction run only OUTSIDE comments, so
+    // documentation blocks in custom functions are not flagged.
+    var out=splitComments(base).map(function(sp){
+        if(sp.type==='comment') return sp.text;
+        var t=sp.text;
+
+        if(kwParts && kwParts.length){
+            var alt=kwParts.join('|');
+            // Optional $/$$ prefix so Let() locals (no prefix) are caught as well as $vars.
+            var reD=new RegExp('(^|[^\\w$.])((?:\\$\\$?)?[\\w.]*(?:'+alt+')[\\w.]*[ \\t]*[\\r\\n]*[ \\t]*=[ \\t]*[\\r\\n]*[ \\t]*)"((?:[^"\\\\]|\\\\.)*)"','gi');
+            t=t.replace(reD,function(m,b,pre,val){ if(val==='[REDACTED]')return m; count++; cats.push(categFromName(pre)); return b+pre+'"[REDACTED]"'; });
+            var reS=new RegExp("(^|[^\\w$.])((?:\\$\\$?)?[\\w.]*(?:"+alt+")[\\w.]*[ \\t]*[\\r\\n]*[ \\t]*=[ \\t]*[\\r\\n]*[ \\t]*)'((?:[^'\\\\]|\\\\.)*)'","gi");
+            t=t.replace(reS,function(m,b,pre,val){ if(val==='[REDACTED]')return m; count++; cats.push(categFromName(pre)); return b+pre+"'[REDACTED]'"; });
+        }
+
+        if(doUrl){
+            t=t.replace(/(https?:\/\/)([a-zA-Z0-9._-]+)((?::\d+)?(?:\/[^\s"']*)?)/g,function(m,sch,host,rest){
+                if(host==='[HOST]'||!isInternalHost(host)) return m;
+                count++; cats.push('url'); return sch+'[HOST]'+(rest||'');
+            });
+            t=t.replace(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g,function(m,ip){
+                if(!isPrivateIp(ip)) return m; count++; cats.push('url'); return '[HOST]';
+            });
+        }
+        return t;
+    }).join('');
+
+    return { text:out, count:count, cats:cats };
+}
+
+// Redact every quoted literal (used for a Set Variable whose NAME looks like a secret).
+function redactAllLiterals(txt){
+    var count=0;
+    var r=txt.replace(/"([^"]*)"/g,function(m,inner){ if(inner===''||inner==='[REDACTED]')return m; count++; return '"[REDACTED]"'; });
+    r=r.replace(/'([^']*)'/g,function(m,inner){ if(inner===''||inner==='[REDACTED]')return m; count++; return "'[REDACTED]'"; });
+    return { text:r, count:count };
+}
+
+// Write calc text back PRESERVING the original node framing. FileMaker stores
+// calculations in CDATA; keeping CDATA avoids re-escaping < > & into entities.
+function setCalcText(calcEl, newText, doc){
+    var useCdata = !!(calcEl.firstChild && calcEl.firstChild.nodeType===4);
+    while(calcEl.firstChild) calcEl.removeChild(calcEl.firstChild);
+    calcEl.appendChild(useCdata ? doc.createCDATASection(newText) : doc.createTextNode(newText));
+}
+
+// Single redact-first pass over a clone. Returns { clone, changes, tally, anyChange }.
+function redactDocument(sourceDoc, cfg){
+    var doc=sourceDoc.cloneNode(true);
+    var root=doc.documentElement;
+    var changes=[];
+    var tally={api_key:0,token:0,password:0,secret:0,smtp:0,oauth:0,credential:0,url:0,total:0};
+    function tally1(c,n){ tally[c]=(tally[c]||0)+n; tally.total+=n; }
+
+    var knownKeyRe=cfg.knownKeyRe;
+    var kwParts=cfg.kwParts;
+    var credNameRe=(cfg.credNameKws&&cfg.credNameKws.length)?new RegExp('(?:'+cfg.credNameKws.join('|')+')','i'):null;
+    var done=new Set();
+
+    function processCalcEl(el, kindLabel){
+        if(done.has(el)) return;
+        var txt=el.textContent||''; if(!txt) return;
+        var r=redactCalcText(txt, knownKeyRe, cfg.inline?kwParts:null, cfg.url);
+        if(r.count>0){
+            setCalcText(el, r.text, doc); done.add(el);
+            r.cats.forEach(function(c){ tally1(c,1); });
+            changes.push({ severity:r.cats.some(function(c){return c!=='url';})?'high':'medium',
+                kind:kindLabel||'Calculation literal', category:dominantCat(r.cats),
+                location:locationOf(el), count:r.count, before:previewRedactions(r.text), note:noteFromCats(r.cats) });
+        }
+    }
+
+    // 0: Configure AI Account (step id 212)
+    root.querySelectorAll('Step[id="212"]').forEach(function(step){
+        step.querySelectorAll('Calculation').forEach(function(el){
+            if(done.has(el)||!el.textContent.trim())return;
+            var before=el.textContent;
+            setCalcText(el,'"[REDACTED]"',doc); done.add(el); tally1('api_key',1);
+            changes.push({severity:'high',kind:'AI account API key',category:'api_key',location:locationOf(el),count:1,before:'"[REDACTED]"',note:'Configure AI Account step value'});
+        });
+    });
+
+    // 1: Set Variable (step id 141) whose name looks like a credential
+    if(credNameRe){
+        root.querySelectorAll('Step[id="141"]').forEach(function(step){
+            var nameEl=step.querySelector('Name'); var varName=nameEl?(nameEl.textContent||''):'';
+            var clean=varName.replace(/^\$+/,'').replace(/\[.*$/,'').trim();
+            if(!credNameRe.test(clean))return;
+            var v=step.querySelector('Value > Calculation'); if(!v||done.has(v))return;
+            var txt=v.textContent||''; var cat=categFromName(varName);
+            if(isBareString(txt)){
+                setCalcText(v,'"[REDACTED]"',doc); done.add(v); tally1(cat,1);
+                changes.push({severity:'high',kind:'Set Variable (credential name)',category:cat,location:locationOf(v),count:1,before:'"[REDACTED]"',note:'Variable "'+varName.trim()+'" set to a literal'});
+            } else {
+                var r=redactAllLiterals(txt);
+                if(r.count>0){ setCalcText(v,r.text,doc); done.add(v); tally1(cat,r.count);
+                    changes.push({severity:'high',kind:'Set Variable (credential name)',category:cat,location:locationOf(v),count:r.count,before:previewRedactions(r.text),note:'Literals in a credential-named variable redacted'});
+                }
+            }
+        });
+    }
+
+    // 2 + 3 + 6: known keys, inline keyword=literal, URLs/IPs across all calcs + custom functions
+    Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ processCalcEl(el, null); });
+    Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ processCalcEl(el, 'Custom function body'); });
+
+    // 4: <Text> nodes carrying a known key format
+    if(cfg.textnode && knownKeyRe){
+        root.querySelectorAll('Step Text').forEach(function(t){
+            var txt=t.textContent||''; if(!txt.trim()||!knownKeyRe.test(txt))return;
+            t.textContent='[REDACTED]'; tally1('api_key',1);
+            changes.push({severity:'medium',kind:'Text node (key format)',category:'api_key',location:locationOf(t),count:1,before:'[REDACTED]',note:'Key-format string in a step Text element'});
+        });
+    }
+
+    // 5: connection-string attributes with an embedded password
+    if(cfg.connstr){
+        var connRe=/(?:password|pwd)\s*=/i;
+        ['ExternalDataSource','DataSource','ODBCDataSource'].forEach(function(sel){
+            root.querySelectorAll(sel).forEach(function(ds){
+                ['DSN','ConnectionString','connection','connectionString','url','Url'].forEach(function(an){
+                    var val=ds.getAttribute(an);
+                    if(val&&connRe.test(val)){
+                        var rv=val.replace(/(?:password|pwd)\s*=\s*[^;,'"]+/gi,'password=[REDACTED]'); ds.setAttribute(an, rv);
+                        tally1('password',1);
+                        changes.push({severity:'medium',kind:'Connection string password',category:'password',location:ds.tagName+nm(ds),count:1,before:previewRedactions(rv),note:'Attribute "'+an+'" contained password='});
+                    }
+                });
+            });
+        });
+    }
+
+    // 7: attributes whose NAME looks like a credential
+    if(credNameRe){
+        root.querySelectorAll('*').forEach(function(el){
+            Array.from(el.attributes).forEach(function(attr){
+                if(!credNameRe.test(attr.name))return;
+                var val=attr.value||''; if(val.length<6||val==='[REDACTED]'||/\[REDACTED\]/.test(val))return;
+                var cat=categFromName(attr.name);
+                el.setAttribute(attr.name,'[REDACTED]'); tally1(cat,1);
+                changes.push({severity:'medium',kind:'Attribute (credential name)',category:cat,location:el.tagName+nm(el),count:1,before:attr.name+'="[REDACTED]"',note:'Attribute name matches a credential keyword'});
+            });
+        });
+    }
+
+    return { clone:doc, changes:changes, tally:tally, anyChange:tally.total>0 };
+}
+
+// ── CDATA REPAIR (ported from Clockwork Inspector) ───────────
+// FileMaker exports sometimes contain broken CDATA boundaries: a literal
+// ]]> inside calc content, or an unclosed CDATA. Four escalating passes,
+// stopping as soon as DOMParser accepts the file.
+
+// Pass 1: escape ]]> not followed (after whitespace) by < (a tag start).
+function repairFileMakerCDATA(input){
+    var out=[], pos=0, len=input.length, escapedCount=0;
+    while(pos<len){
+        var idx=input.indexOf(']]>',pos);
+        if(idx===-1){ out.push(input.slice(pos)); break; }
+        out.push(input.slice(pos,idx));
+        var look=idx+3;
+        while(look<len){ var c=input.charCodeAt(look); if(c===32||c===9||c===10||c===13) look++; else break; }
+        if(look<len && input.charCodeAt(look)===60){ out.push(']]>'); }
+        else { out.push(']]]]><![CDATA[>'); escapedCount++; }
+        pos=idx+3;
+    }
+    return { text:out.join(''), escapedCount:escapedCount };
+}
+
+// Pass 2: insert synthetic ]]> before a nested <![CDATA[ opening.
+function repairUnclosedCDATA(input){
+    var out=[], pos=0, len=input.length, fixedCount=0;
+    var OPEN='<![CDATA[', CLOSE=']]>';
+    while(pos<len){
+        var openIdx=input.indexOf(OPEN,pos);
+        if(openIdx===-1){ out.push(input.slice(pos)); break; }
+        out.push(input.slice(pos,openIdx+OPEN.length));
+        var cs=openIdx+OPEN.length;
+        var nextOpen=input.indexOf(OPEN,cs), nextClose=input.indexOf(CLOSE,cs);
+        if(nextClose!==-1 && (nextOpen===-1||nextClose<nextOpen)){
+            out.push(input.slice(cs,nextClose+CLOSE.length)); pos=nextClose+CLOSE.length;
+        } else if(nextOpen!==-1){
+            out.push(input.slice(cs,nextOpen)); out.push(CLOSE); fixedCount++; pos=nextOpen;
+        } else {
+            out.push(input.slice(cs)); out.push(CLOSE); fixedCount++; pos=len;
+        }
+    }
+    return { text:out.join(''), fixedCount:fixedCount };
+}
+
+// Pass 3: use the parser's reported line/column to inject ]]> before the next </.
+function repairAtLineCol(input, line, col){
+    var offset=0, curLine=1;
+    while(curLine<line && offset<input.length){ var nl=input.indexOf('\n',offset); if(nl===-1){offset=input.length;break;} offset=nl+1; curLine++; }
+    offset=Math.min(input.length, offset+Math.max(0,col-1));
+    var cdataStart=input.lastIndexOf('<![CDATA[',offset);
+    if(cdataStart===-1) return null;
+    var nextClose=input.indexOf('</',cdataStart+9);
+    if(nextClose===-1) return null;
+    return { text:input.slice(0,nextClose)+']]>'+input.slice(nextClose), fixed:true };
+}
+
+// Pass 4 (last resort): strip every CDATA wrapper and entity-encode content.
+function stripCDATAWrappers(input){
+    var out=[], pos=0, len=input.length, strippedCount=0;
+    var OPEN='<![CDATA[', CLOSE=']]>';
+    function esc(s){ return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g,'\uFFFD').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    while(pos<len){
+        var oi=input.indexOf(OPEN,pos);
+        if(oi===-1){ out.push(input.slice(pos)); break; }
+        out.push(input.slice(pos,oi));
+        var cs=oi+OPEN.length;
+        var nextOpen=input.indexOf(OPEN,cs), searchEnd=nextOpen===-1?len:nextOpen;
+        var lastClose=input.lastIndexOf(CLOSE,searchEnd), contentEnd;
+        if(lastClose===-1||lastClose<cs){ contentEnd=searchEnd; pos=searchEnd; }
+        else { contentEnd=lastClose; pos=lastClose+CLOSE.length; }
+        out.push(esc(input.slice(cs,contentEnd))); strippedCount++;
+    }
+    return { text:out.join(''), strippedCount:strippedCount };
+}
+
+// ── FILE HANDLING ────────────────────────────────────────────
+function handleFileInput(evt){ var f=evt.target.files[0]; if(f) loadFile(f); }
+function handleDragOver(evt){ evt.preventDefault(); $('drop-zone').classList.add('drag-over'); }
+function handleDragLeave(){ $('drop-zone').classList.remove('drag-over'); }
+function handleDrop(evt){ evt.preventDefault(); $('drop-zone').classList.remove('drag-over'); var f=evt.dataTransfer.files[0]; if(f) loadFile(f); }
+
+function loadFile(file){
+    var reader=new FileReader();
+    reader.onload=function(e){
+        var text=e.target.result;
+        if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+        text=text.replace(/^(<\?xml\b[^?]*?)\s+encoding\s*=\s*(?:"[^"]*"|'[^']*')/i,'$1');
+
+        var candidate=text;
+        var doc=new DOMParser().parseFromString(candidate,'application/xml');
+        var pe=doc.querySelector('parsererror');
+
+        // Multi-pass CDATA repair on any parse error. The passes are fast and
+        // do nothing if there are no broken CDATA boundaries to fix.
+        if(pe){
+            // Pass 1
+            var p1=repairFileMakerCDATA(candidate);
+            if(p1.escapedCount>0){ candidate=p1.text; doc=new DOMParser().parseFromString(candidate,'application/xml'); pe=doc.querySelector('parsererror'); }
+            // Pass 2
+            if(pe){ var p2=repairUnclosedCDATA(candidate); if(p2.fixedCount>0){ candidate=p2.text; doc=new DOMParser().parseFromString(candidate,'application/xml'); pe=doc.querySelector('parsererror'); } }
+            // Pass 3: up to 50 attempts using error line/col
+            for(var att=0;att<50&&pe;att++){
+                var em=pe.textContent||'', lm=em.match(/line\s+(\d+)/i), cm=em.match(/column\s+(\d+)/i);
+                if(!lm||!cm) break;
+                var fix=repairAtLineCol(candidate,parseInt(lm[1],10),parseInt(cm[1],10));
+                if(!fix||!fix.fixed) break;
+                candidate=fix.text; doc=new DOMParser().parseFromString(candidate,'application/xml'); pe=doc.querySelector('parsererror');
+            }
+            // Pass 4: nuclear, strip all CDATA wrappers
+            if(pe){ var p4=stripCDATAWrappers(text); if(p4.strippedCount>0){ candidate=p4.text; doc=new DOMParser().parseFromString(candidate,'application/xml'); pe=doc.querySelector('parsererror'); } }
+        }
+
+        if(pe){
+            var detail=(pe.textContent||'').replace(/\s+/g,' ').trim();
+            if(detail.length>200) detail=detail.slice(0,200);
+            $('status-text').textContent='XML parse error: '+detail;
+            return;
+        }
+        state.rawText=candidate; state.fileName=file.name; state.doc=doc;
+        $('drop-zone').style.display='none';
+        var li=$('loaded-info'); li.style.display='flex';
+        $('btn-clear').style.display='inline-block';
+        $('btn-rescan').style.display='inline-block';
+        $('btn-copy').style.display='inline-block';
+        $('loaded-filename').textContent=file.name;
+        var big = file.size>20*1024*1024 ? '  \u00b7  large file, processing may be slow' : '';
+        $('loaded-meta').textContent=Math.round(candidate.length/1024).toLocaleString()+' KB  \u00b7  '+candidate.split('\n').length.toLocaleString()+' lines'+big;
+        runScan();
+    };
+    reader.onerror=function(){ $('status-text').textContent='Could not read the file'; };
+    reader.readAsText(file);
+}
+
+function clearFile(){
+    state={ rawText:null, fileName:null, doc:null, findings:[], customKws:state.customKws, lastSummary:null, intensity:state.intensity, lastRun:null, lastRedactedXml:null };
+    $('drop-zone').style.display='flex';
+    $('loaded-info').style.display='none';
+    $('btn-clear').style.display='none';
+    $('btn-rescan').style.display='none';
+    $('btn-copy').style.display='none';
+    $('btn-strip').disabled=true;
+    $('results-body').innerHTML='<div class="no-file-prompt">Load an XML file to scan</div>';
+    $('status-text').textContent='No file loaded';
+    $('file-input').value='';
+    closeSummaryOverlay();
+}
+
+// ── INTENSITY ────────────────────────────────────────────────
+// ── SETTINGS PANEL ───────────────────────────────────────────
+function toggleSettings(){
+    $('settings-collapse').classList.toggle('open');
+}
+
+function setIntensity(level){
+    state.intensity=level;
+    ['strict','normal','aggressive'].forEach(function(l){ $('pill-'+l).classList.toggle('active', l===level); });
+    if(level==='strict'){
+        $('pat-token').checked=false; $('pat-secret').checked=false; $('pat-credential').checked=false;
+    } else if(level==='aggressive'){
+        document.querySelectorAll('.pattern-toggle').forEach(function(t){ t.checked=true; });
+    } else {
+        $('pat-token').checked=true; $('pat-secret').checked=true; $('pat-credential').checked=true;
+    }
+    if(state.doc) runScan();
+}
+
+// ── CUSTOM PATTERNS ──────────────────────────────────────────
+function addCustomPattern(){
+    var input=$('custom-input'); var val=input.value.trim();
+    if(!val || state.customKws.indexOf(val)!==-1){ input.value=''; return; }
+    state.customKws.push(val); renderCustomTags(); input.value='';
+    if(state.doc) runScan();
+}
+function removeCustomPattern(kw){
+    state.customKws=state.customKws.filter(function(k){ return k!==kw; });
+    renderCustomTags();
+    if(state.doc) runScan();
+}
+function renderCustomTags(){
+    $('custom-tags').innerHTML=state.customKws.map(function(kw){
+        return '<span class="custom-tag">'+esc(kw)+'<button class="custom-tag-remove" onclick="removeCustomPattern(\''+esc(kw).replace(/'/g,"&#39;")+'\')" aria-label="Remove">\u00d7</button></span>';
+    }).join('');
+}
+$('custom-input').addEventListener('keydown', function(e){ if(e.key==='Enter') addCustomPattern(); });
+document.querySelectorAll('.pattern-toggle').forEach(function(t){ t.addEventListener('change', function(){ if(state.doc) runScan(); }); });
+
+// ── HTML ESCAPE ──────────────────────────────────────────────
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── CONFIG FROM UI ───────────────────────────────────────────
+function buildConfig(){
+    var known={
+        sk:$('pat-skkey').checked, aiza:$('pat-aikey').checked,
+        xai:$('pat-xaikey').checked, groq:$('pat-xaikey').checked,
+        aws:$('pat-awskey').checked, github:$('pat-ghkey').checked,
+        slack:$('pat-slackkey').checked, stripe:$('pat-stripekey').checked
+    };
+    var active={
+        apikey:$('pat-apikey').checked, token:$('pat-token').checked,
+        password:$('pat-password').checked, secret:$('pat-secret').checked,
+        smtp:$('pat-smtp').checked, privatekey:$('pat-privatekey').checked,
+        credential:$('pat-credential').checked, custom:state.customKws.slice()
+    };
+    return {
+        knownKeyRe:buildKnownKeyRe(known),
+        kwParts:kwPartsFrom(active),
+        credNameKws:kwPartsFrom(active),
+        inline:$('pat-inline').checked, url:$('pat-urlhost').checked,
+        textnode:$('pat-textnode').checked, connstr:$('pat-connstr').checked
+    };
+}
+
+// ── RUN (redact-first; findings derived from the redacted clone) ──
+function runScan(){
+    if(!state.doc) return;
+    state.lastRun=redactDocument(state.doc, buildConfig());
+    state.findings=state.lastRun.changes;
+    renderFindings();
+}
+
+// ── RENDER FINDINGS ──────────────────────────────────────────
+function renderFindings(){
+    var container=$('results-body');
+    var findings=state.findings||[];
+
+    if(findings.length===0){
+        container.innerHTML=
+            '<div class="empty-state">'+
+            '<svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="16" cy="16" r="12"/><path d="M11 16l4 4 7-7"/></svg>'+
+            '<div style="font-weight:500;color:var(--good)">No credential values found</div>'+
+            '<div>Nothing matched the active patterns. Account names, file paths and hostnames are not checked.</div></div>';
+        $('status-text').innerHTML = state.doc
+            ? '<span class="status-ok">Nothing matched</span> with the current patterns'
+            : 'No file loaded';
+        var b=$('btn-strip'); b.disabled=!state.doc; b.innerHTML='Download XML (no changes)';
+        return;
+    }
+
+    var high=findings.filter(function(f){return f.severity==='high';}).length;
+    var medium=findings.filter(function(f){return f.severity==='medium';}).length;
+    var redacted=state.lastRun?state.lastRun.tally.total:findings.length;
+
+    var html='<div class="summary-bar">'+
+        '<div class="summary-stat"><div class="summary-stat-val '+(high>0?'red':'')+'">'+high+'</div><div class="summary-stat-label">High</div></div>'+
+        '<div class="summary-stat"><div class="summary-stat-val">'+medium+'</div><div class="summary-stat-label">Medium</div></div>'+
+        '<div class="summary-stat"><div class="summary-stat-val red">'+redacted+'</div><div class="summary-stat-label">Values</div></div>'+
+        '</div><div class="section-header">Each value below will be redacted. CDATA and surrounding logic are preserved</div>';
+
+    findings.forEach(function(f){
+        var bc=f.severity==='high'?'badge-high':'badge-medium';
+        var cnt=(f.count&&f.count>1)?' <span class="finding-kind">('+f.count+' values)</span>':'';
+        html+='<div class="finding"><div class="finding-meta">'+
+            '<span class="badge '+bc+'">'+f.severity+'</span>'+
+            '<span class="finding-kind">'+esc(f.kind)+'</span>'+cnt+
+            '<span class="finding-location">'+esc(f.location)+'</span>'+
+            '</div><div class="finding-preview">'+esc(f.before)+'</div>'+
+            '<div class="finding-note">'+esc(f.note)+'</div></div>';
+    });
+
+    container.innerHTML=html;
+    var btnStrip=$('btn-strip');
+    btnStrip.disabled=false;
+    btnStrip.innerHTML='<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 7h10M7 2l5 5-5 5"/></svg> Download redacted XML ('+redacted+')';
+    $('status-text').innerHTML='<span class="status-count">'+findings.length+' finding'+(findings.length===1?'':'s')+'</span>, '+redacted+' value'+(redacted===1?'':'s')+' to redact. Review before downloading';
+}
+
+// ── SERIALISE OUTPUT ─────────────────────────────────────────
+// No changes -> hand back the original bytes untouched.
+// Otherwise serialise the clone (CDATA preserved) with a native-style declaration.
+function serializeOutput(){
+    if(!state.lastRun) return null;
+    if(!state.lastRun.anyChange) return state.rawText;
+    var x=new XMLSerializer().serializeToString(state.lastRun.clone);
+    x=x.replace(/^<\?xml[^?]*\?>\s*/i,'');
+    return '<?xml version="1.0" encoding="UTF-8"?>\n'+x;
+}
+
+// ── STRIP AND DOWNLOAD ───────────────────────────────────────
+function doStrip(){
+    if(!state.doc) return;
+    if(!state.lastRun) runScan();
+    var out=serializeOutput();
+    if(out===null) return;
+    state.lastRedactedXml=out;
+
+    var origLines=(state.rawText||'').split('\n').length;
+    var redLines=out.split('\n').length;
+    var baseName=(state.fileName||'export.xml').replace(/\.xml$/i,'');
+    var outName=baseName+'-redacted.xml';
+    state.lastSummary={ tally:state.lastRun.tally, origLines:origLines, redLines:redLines, outName:outName, anyChange:state.lastRun.anyChange };
+
+    var blob=new Blob([out],{type:'application/xml'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=outName; a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+    showSummaryOverlay();
+}
+
+// ── COPY TO CLIPBOARD ────────────────────────────────────────
+function doCopy(){
+    if(!state.doc) return;
+    if(!state.lastRun) runScan();
+    var out=serializeOutput();
+    if(out===null) return;
+    state.lastRedactedXml=out;
+    navigator.clipboard.writeText(out).then(function(){
+        var btn=$('btn-copy'); var orig=btn.textContent;
+        btn.textContent='Copied'; btn.classList.add('copied-flash');
+        setTimeout(function(){ btn.textContent=orig; btn.classList.remove('copied-flash'); }, 2000);
+    }).catch(function(){
+        var ta=document.createElement('textarea'); ta.value=out; ta.style.cssText='position:fixed;opacity:0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        var btn=$('btn-copy'); btn.textContent='Copied'; setTimeout(function(){ btn.textContent='Copy XML'; }, 2000);
+    });
+}
+
+// ── SUMMARY OVERLAY ──────────────────────────────────────────
+function showSummaryOverlay(){
+    var s=state.lastSummary; if(!s) return;
+    var t=s.tally;
+    var catNames={ api_key:'API keys', token:'Auth tokens', password:'Passwords', secret:'Secrets', smtp:'SMTP credentials', oauth:'OAuth tokens', credential:'Credentials', url:'Hostnames and IPs' };
+    var catRows='';
+    Object.keys(catNames).forEach(function(cat){
+        var n=t[cat]||0; if(!n) return;
+        catRows+='<div class="summary-category-row"><span>'+esc(catNames[cat])+'</span><span class="summary-count">'+n+'</span></div>';
+    });
+    if(!catRows) catRows='<div class="summary-category-row"><span style="color:var(--ink-3)">No values redacted</span></div>';
+    var linesMatch=s.origLines===s.redLines;
+    var titleText = s.anyChange
+        ? (esc(t.total)+' value'+(t.total===1?'':'s')+' redacted \u2014 '+esc(s.outName)+' downloaded')
+        : ('No changes \u2014 original file saved as '+esc(s.outName));
+
+    var html='<div class="summary-overlay" id="summary-overlay">'+
+        '<div class="summary-overlay-title">'+
+        '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="summary-ok-icon"><circle cx="9" cy="9" r="7"/><path d="M6 9l2.5 2.5 4-4"/></svg>'+
+        titleText+'</div>'+
+        '<div><div class="summary-section-label">By category</div>'+catRows+'</div>'+
+        '<div><div class="summary-section-label">Line count</div>'+
+        '<div class="summary-lines-grid">'+
+        '<div class="summary-line-stat"><div class="summary-line-val">'+s.origLines.toLocaleString()+'</div><div class="summary-line-label">Original</div></div>'+
+        '<div class="summary-line-stat"><div class="summary-line-val">'+s.redLines.toLocaleString()+'</div><div class="summary-line-label">Redacted</div></div>'+
+        '</div>'+(linesMatch?'<div style="margin-top:8px"><span class="summary-match-badge">Line count preserved</span></div>':'')+
+        '</div>'+
+        '<div style="font-size:11px;color:var(--ink-3)">Hostnames and IPs are replaced with [HOST], not [REDACTED]. Pattern matching is heuristic and does not cover account names, file paths or arbitrary data. Review before sharing.</div>'+
+        '<button class="btn" onclick="closeSummaryOverlay()">Close</button></div>';
+
+    var existing=$('summary-overlay'); if(existing) existing.remove();
+    $('right-panel').insertAdjacentHTML('beforeend', html);
+}
+
+function closeSummaryOverlay(){ var o=$('summary-overlay'); if(o) o.remove(); }
+
+</script>
+</body>
+</html>
