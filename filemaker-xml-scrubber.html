@@ -213,8 +213,23 @@
           </div>
           <div class="pattern-row">
             <input type="checkbox" class="pattern-toggle" id="pat-stripekey" checked>
-            <span class="pattern-name">sk_live_ / rk_live_</span>
-            <span class="pattern-desc">Stripe live keys</span>
+            <span class="pattern-name">sk_live_ / sk_test_</span>
+            <span class="pattern-desc">Stripe live + test keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-sgkey" checked>
+            <span class="pattern-name">SG.xxxx.xxxx</span>
+            <span class="pattern-desc">SendGrid API keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-pemkey" checked>
+            <span class="pattern-name">BEGIN PRIVATE KEY</span>
+            <span class="pattern-desc">PEM / SSH private keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-webhook" checked>
+            <span class="pattern-name">hooks.slack.com / ...</span>
+            <span class="pattern-desc">Slack / Discord / Teams webhooks</span>
           </div>
         </div>
 
@@ -266,8 +281,13 @@
           </div>
           <div class="pattern-row">
             <input type="checkbox" class="pattern-toggle" id="pat-connstr" checked>
-            <span class="pattern-name">password= / pwd=</span>
-            <span class="pattern-desc">Connection strings</span>
+            <span class="pattern-name">password= / AccountKey=</span>
+            <span class="pattern-desc">Connection strings, Azure keys</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-plugin" checked>
+            <span class="pattern-name">MBS("Register") / *_Register</span>
+            <span class="pattern-desc">Plugin licence keys</span>
           </div>
           <div class="pattern-row">
             <input type="checkbox" class="pattern-toggle" id="pat-urlhost" checked>
@@ -314,7 +334,7 @@
     Download redacted XML
   </button>
 </footer>
-<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.0 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
+<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.1 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
 
 <script>
 // ============================================================
@@ -344,7 +364,14 @@ function buildKnownKeyRe(o){
     if(o.aws)    p.push('AKIA[0-9A-Z]{16}','ASIA[0-9A-Z]{16}');      // AWS access key id
     if(o.github) p.push('gh[posru]_[A-Za-z0-9]{20,}','github_pat_[A-Za-z0-9_]{20,}');
     if(o.slack)  p.push('xox[baprs]-[A-Za-z0-9-]{10,}');
-    if(o.stripe) p.push('[sr]k_live_[A-Za-z0-9]{20,}');
+    if(o.stripe) p.push('[sr]k_(?:live|test)_[A-Za-z0-9]{20,}');     // Stripe live + test secret/restricted keys
+    if(o.sendgrid) p.push('SG\\.[\\w-]{16,}\\.[\\w-]{16,}');          // SendGrid API key (SG.xxxx.xxxx)
+    if(o.pem)    p.push('-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----');   // PEM private key block (RSA/EC/OPENSSH/PKCS8)
+    if(o.webhook){                                                  // incoming-webhook URLs carry their own auth token
+        p.push('hooks\\.slack\\.com/services/[A-Za-z0-9/]+');       // Slack
+        p.push('discord(?:app)?\\.com/api/webhooks/\\d+/[\\w-]+');  // Discord
+        p.push('[A-Za-z0-9.-]+\\.webhook\\.office\\.com/');         // Microsoft Teams / Power Automate
+    }
     return p.length ? new RegExp(p.join('|')) : null;
 }
 
@@ -355,7 +382,7 @@ function kwPartsFrom(a){
     if(a.password)   p.push('password','passwd');
     if(a.secret)     p.push('secret');
     if(a.smtp)       p.push('smtp[_-]?pass','smtp[_-]?key');
-    if(a.privatekey) p.push('private[_-]?key','auth[_-]?key');
+    if(a.privatekey) p.push('private[_-]?key','auth[_-]?key','ssh[_-]?key','sftp[_-]?pass','passphrase');
     if(a.credential) p.push('credential','oauth');
     (a.custom||[]).forEach(function(c){ p.push(escapeRe(c)); });
     return p;
@@ -448,7 +475,7 @@ function isInternalHost(host){
 }
 
 // Redact credential literals inside one calculation string. Returns { text, count, cats }.
-function redactCalcText(txt, knownKeyRe, kwParts, doUrl){
+function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure){
     var count=0, cats=[];
 
     // Known key formats run across the WHOLE text, comments included. Near-zero
@@ -483,6 +510,12 @@ function redactCalcText(txt, knownKeyRe, kwParts, doUrl){
                 if(!isPrivateIp(ip)) return m; count++; cats.push('url'); return '[HOST]';
             });
         }
+        if(doAzure){
+            // Azure storage / SAS: redact the secret segment, keep endpoint + account
+            // name as context. Mirrors the connection-string password= handling.
+            t=t.replace(/(AccountKey\s*=\s*)[^;"'\s]+/gi,function(m,k){ count++; cats.push('secret'); return k+'[REDACTED]'; });
+            t=t.replace(/(SharedAccessSignature\s*=\s*)[^;"'\s]+/gi,function(m,k){ count++; cats.push('secret'); return k+'[REDACTED]'; });
+        }
         return t;
     }).join('');
 
@@ -497,7 +530,62 @@ function redactAllLiterals(txt){
     return { text:r, count:count };
 }
 
-// Write calc text back PRESERVING the original node framing. FileMaker stores
+// Redact plugin licence/registration keys passed as POSITIONAL arguments, which
+// the keyword=value pass cannot see. Handles MBS("Register"; ...), BE_Register(...)
+// and any *_Register(...) activation call. Walks the balanced argument list with
+// string awareness and redacts each string literal except the MBS "Register"
+// selector. Returns { text, count }.
+function redactRegisterCalls(txt){
+    var total=0;
+    // Only scan code spans, never documentation comments.
+    var out=splitComments(txt).map(function(sp){
+        if(sp.type==='comment') return sp.text;
+        var r=scanRegister(sp.text);
+        total+=r.count; return r.text;
+    }).join('');
+    return { text:out, count:total };
+}
+function scanRegister(txt){
+    var count=0;
+    var nameRe=/\b(MBS|[A-Za-z][A-Za-z0-9]*_Register)\b/g;
+    var result='', last=0, m;
+    while((m=nameRe.exec(txt))!==null){
+        var name=m[1];
+        // Skip whitespace to the opening paren; bail if this isn't a call.
+        var i=m.index+m[0].length;
+        while(i<txt.length && /\s/.test(txt[i])) i++;
+        if(txt[i]!=='(') continue;
+
+        // Find the matching close paren, ignoring parens inside string literals.
+        var depth=0, j=i, inStr=false, q='', esc=false;
+        for(; j<txt.length; j++){
+            var c=txt[j];
+            if(inStr){ if(esc) esc=false; else if(c==='\\') esc=true; else if(c===q) inStr=false; continue; }
+            if(c==='"'||c==="'"){ inStr=true; q=c; continue; }
+            if(c==='(') depth++;
+            else if(c===')'){ depth--; if(depth===0){ j++; break; } }
+        }
+        var span=txt.slice(i,j);   // includes the surrounding ( )
+
+        // MBS is only a registration call when the first argument is "Register".
+        if(name==='MBS' && !/^\(\s*(["'])Register\1/i.test(span)) continue;
+
+        var localCount=0;
+        var newSpan=span.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g,function(lit){
+            var inner=lit.slice(1,-1);
+            if(/^Register$/i.test(inner)) return lit;          // keep MBS selector
+            if(inner===''||inner==='[REDACTED]') return lit;
+            localCount++; return lit[0]+'[REDACTED]'+lit[0];
+        });
+        if(localCount>0){
+            result+=txt.slice(last,i)+newSpan;
+            last=j; count+=localCount;
+            nameRe.lastIndex=j;   // don't rescan inside the call we just handled
+        }
+    }
+    result+=txt.slice(last);
+    return { text:result, count:count };
+}
 // calculations in CDATA; keeping CDATA avoids re-escaping < > & into entities.
 function setCalcText(calcEl, newText, doc){
     var useCdata = !!(calcEl.firstChild && calcEl.firstChild.nodeType===4);
@@ -510,7 +598,7 @@ function redactDocument(sourceDoc, cfg){
     var doc=sourceDoc.cloneNode(true);
     var root=doc.documentElement;
     var changes=[];
-    var tally={api_key:0,token:0,password:0,secret:0,smtp:0,oauth:0,credential:0,url:0,total:0};
+    var tally={api_key:0,token:0,password:0,secret:0,smtp:0,oauth:0,credential:0,license:0,url:0,total:0};
     function tally1(c,n){ tally[c]=(tally[c]||0)+n; tally.total+=n; }
 
     var knownKeyRe=cfg.knownKeyRe;
@@ -521,7 +609,7 @@ function redactDocument(sourceDoc, cfg){
     function processCalcEl(el, kindLabel){
         if(done.has(el)) return;
         var txt=el.textContent||''; if(!txt) return;
-        var r=redactCalcText(txt, knownKeyRe, cfg.inline?kwParts:null, cfg.url);
+        var r=redactCalcText(txt, knownKeyRe, cfg.inline?kwParts:null, cfg.url, cfg.azure);
         if(r.count>0){
             setCalcText(el, r.text, doc); done.add(el);
             r.cats.forEach(function(c){ tally1(c,1); });
@@ -559,6 +647,44 @@ function redactDocument(sourceDoc, cfg){
                 }
             }
         });
+    }
+
+    // 1.4: PEM private-key blocks. The base64 body has no safe shape of its own,
+    // so a calc containing a key marker is treated as a key-handling calc and ALL
+    // its literals are redacted. Catches keys split across concatenated literals.
+    if(cfg.pem){
+        var pemMark=/-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----/;
+        function processPem(el, kindLabel){
+            if(done.has(el)) return;
+            var txt=el.textContent||''; if(!pemMark.test(txt)) return;
+            var r=redactAllLiterals(txt);
+            if(r.count>0){
+                setCalcText(el, r.text, doc); done.add(el); tally1('secret', r.count);
+                changes.push({ severity:'high', kind:kindLabel||'PEM private key', category:'secret',
+                    location:locationOf(el), count:r.count, before:previewRedactions(r.text),
+                    note:'Private-key block \u2014 all literals in the calc redacted' });
+            }
+        }
+        Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ processPem(el, null); });
+        Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ processPem(el, 'PEM private key (custom function)'); });
+    }
+
+    // 1.5: plugin registration calls (positional args, invisible to keyword=value).
+    // Runs first and does NOT mark the node done, so a real key elsewhere in the
+    // same calc is still caught by the generic pass below.
+    if(cfg.plugin){
+        function processRegister(el, kindLabel){
+            var txt=el.textContent||''; if(!txt) return;
+            var r=redactRegisterCalls(txt);
+            if(r.count>0){
+                setCalcText(el, r.text, doc); tally1('license', r.count);
+                changes.push({ severity:'medium', kind:kindLabel||'Plugin registration key', category:'license',
+                    location:locationOf(el), count:r.count, before:previewRedactions(r.text),
+                    note:'Literal argument(s) to a *_Register / MBS("Register") call \u2014 verify before sharing' });
+            }
+        }
+        Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ if(!done.has(el)) processRegister(el, null); });
+        Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ if(!done.has(el)) processRegister(el, 'Plugin registration key (custom function)'); });
     }
 
     // 2 + 3 + 6: known keys, inline keyword=literal, URLs/IPs across all calcs + custom functions
@@ -800,7 +926,9 @@ function buildConfig(){
         sk:$('pat-skkey').checked, aiza:$('pat-aikey').checked,
         xai:$('pat-xaikey').checked, groq:$('pat-xaikey').checked,
         aws:$('pat-awskey').checked, github:$('pat-ghkey').checked,
-        slack:$('pat-slackkey').checked, stripe:$('pat-stripekey').checked
+        slack:$('pat-slackkey').checked, stripe:$('pat-stripekey').checked,
+        sendgrid:$('pat-sgkey').checked,
+        pem:$('pat-pemkey').checked, webhook:$('pat-webhook').checked
     };
     var active={
         apikey:$('pat-apikey').checked, token:$('pat-token').checked,
@@ -813,7 +941,9 @@ function buildConfig(){
         kwParts:kwPartsFrom(active),
         credNameKws:kwPartsFrom(active),
         inline:$('pat-inline').checked, url:$('pat-urlhost').checked,
-        textnode:$('pat-textnode').checked, connstr:$('pat-connstr').checked
+        textnode:$('pat-textnode').checked, connstr:$('pat-connstr').checked,
+        plugin:$('pat-plugin').checked, azure:$('pat-connstr').checked,
+        pem:$('pat-pemkey').checked
     };
 }
 
@@ -925,7 +1055,7 @@ function doCopy(){
 function showSummaryOverlay(){
     var s=state.lastSummary; if(!s) return;
     var t=s.tally;
-    var catNames={ api_key:'API keys', token:'Auth tokens', password:'Passwords', secret:'Secrets', smtp:'SMTP credentials', oauth:'OAuth tokens', credential:'Credentials', url:'Hostnames and IPs' };
+    var catNames={ api_key:'API keys', token:'Auth tokens', password:'Passwords', secret:'Secrets', smtp:'SMTP credentials', oauth:'OAuth tokens', credential:'Credentials', license:'Plugin licence keys', url:'Hostnames and IPs' };
     var catRows='';
     Object.keys(catNames).forEach(function(cat){
         var n=t[cat]||0; if(!n) return;

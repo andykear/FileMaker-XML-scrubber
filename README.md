@@ -9,9 +9,9 @@ A single file, browser-based tool that strips credential values from FileMaker X
 
 ## What problem does this solve?
 
-When you paste FileMaker script XML or DDR exports into ChatGPT, Claude, Gemini or any other AI tool, you risk leaking API keys, passwords, OAuth tokens and internal hostnames that are embedded in calculations and configurations.
+When you paste FileMaker script XML or DDR exports into ChatGPT, Claude, Gemini or any other AI tool, you risk leaking API keys, passwords, OAuth tokens, private keys and internal hostnames that are embedded in calculations and configurations.
 
-This tool redacts them automatically — while preserving the logic so you can still get help.
+This tool redacts them automatically while preserving the logic, so you can still get help.
 
 ---
 
@@ -47,17 +47,38 @@ The key and the internal hostname are gone. The Let() block, the concatenation, 
 
 ---
 
-## What it removes
+## What it scrubs
 
-- **Known key formats** in string literals: OpenAI (`sk-`, `sk-proj-`), Anthropic (`sk-ant-`), Google (`AIza`), xAI (`xai-`), Groq (`gsk_`), AWS (`AKIA`, `ASIA`), GitHub (`ghp_`, `github_pat_`), Stripe (`sk_live_`, `sk_test_`), SendGrid (`SG.`)
-- **Configure AI Account** step values (step id 212), fully redacted.
-- **Set Variable** steps (step id 141) whose name matches a credential keyword. Single literals are replaced whole. Expressions have every literal inside them redacted.
-- **Inline keyword assignments** like `apikey = "value"` inside calculations, including Let() locals with no `$` prefix.
-- **Connection string passwords** (`password=` or `pwd=` in DSN and connection attributes).
-- **Internal hostnames and private IPs**, replaced with `[HOST]`. Public URLs are left alone.
-- **Attributes** whose name matches a credential keyword.
+### Known key and secret formats
 
-Comment blocks inside calculations are skipped. Known key formats (which have near zero false positive rates) are still caught everywhere, including inside comments.
+These have near zero false positive rates, so they are matched everywhere, including inside comments. The whole string literal is replaced.
+
+- **OpenAI** API keys (`sk-`, `sk-proj-`)
+- **Anthropic** API keys (`sk-ant-`)
+- **Google** AI keys (`AIza`)
+- **xAI** keys (`xai-`)
+- **Groq** keys (`gsk_`)
+- **AWS** access key IDs (`AKIA`, `ASIA`)
+- **GitHub** tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`)
+- **Slack** tokens (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-`, `xoxs-`)
+- **Stripe** keys (`sk_live_`, `rk_live_`, `sk_test_`, `rk_test_`)
+- **SendGrid** API keys (`SG.xxxx.xxxx`)
+- **PEM and SSH private keys** (`-----BEGIN ... PRIVATE KEY-----`), including keys split across concatenated literals
+- **Incoming webhook URLs** for Slack, Discord and Microsoft Teams, where the URL itself carries the auth token
+
+### Contextual redaction
+
+These depend on where a value sits or what it is named, so they are matched only outside comment blocks.
+
+- **Configure AI Account** step values (step id 212), fully redacted
+- **Set Variable** steps (step id 141) whose name matches a credential keyword: a single literal is replaced whole, an expression has every literal inside it redacted
+- **Inline keyword assignments** inside calculations, such as `apikey = "value"`, including Let() locals with no `$` prefix
+- **Credential keywords** covered: api key, token, bearer, password, secret, SMTP pass or key, private key, auth key, SSH key, SFTP pass, passphrase, credential, OAuth
+- **Connection string passwords** (`password=` and `pwd=` in DSN and connection attributes)
+- **Azure storage keys**: the `AccountKey=` and `SharedAccessSignature=` segments of a connection string, leaving the endpoint and account name as context
+- **Plugin licence keys**: the literal arguments to `MBS("Register"; ...)` and any `*_Register(...)` activation call, with the MBS selector preserved
+- **Internal hostnames and private IPs**, replaced with `[HOST]`. Public URLs are left alone
+- **Attributes** whose name matches a credential keyword
 
 ---
 
@@ -65,11 +86,11 @@ Comment blocks inside calculations are skipped. Known key formats (which have ne
 
 This is a heuristic scrubber, not a guarantee. It does not catch:
 
-- Account names and privilege set names.
-- Internal file paths and file names.
-- ESS and ODBC data source names beyond the password field.
-- Email addresses and SMTP server names.
-- Value list contents, schema names, field names or any sensitive literal that does not match a credential shape.
+- Account names and privilege set names
+- Internal file paths and file names
+- ESS and ODBC data source names beyond the password field
+- Email addresses and SMTP server names
+- Value list contents, schema names, field names or any sensitive literal that does not match a credential shape
 
 A FileMaker XML export exposes a lot of structure regardless of this tool. Always review the output before sharing it.
 
@@ -105,7 +126,7 @@ Detection settings are available behind the disclosure panel if you need to adju
 
 ## About the output
 
-Calculations stay inside CDATA so operators are not re-escaped into entities. If nothing matched, the original text is returned unchanged. The output is intended for sharing and review. It is not guaranteed to be 100% safe — always review before posting.
+Calculations stay inside CDATA so operators are not re-escaped into entities. If nothing matched, the original text is returned unchanged. The output is intended for sharing and review. It is not guaranteed to be 100% safe, so always review before posting.
 
 ---
 
@@ -129,4 +150,4 @@ Provided as is, with no warranty. The tool may miss values or redact more than y
 
 ---
 
-v1.0 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)
+v1.1 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)
