@@ -5,34 +5,72 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FileMaker XML Scrubber</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --bg:#f7f6f2; --surface:#ffffff; --ink:#1a1916; --ink-2:#4a4843; --ink-3:#8a8780;
-    --line:#e2e0d8; --line-2:#cccab8; --brand:#c94a1e; --brand-dk:#a33a14; --brand-lt:#faecea;
-    --good:#1e7a48; --good-lt:#e8f5ee; --warn:#9a6200; --warn-lt:#fff8e6;
-    --mono:'JetBrains Mono','Fira Mono',ui-monospace,monospace;
-    --sans:'Inter','DM Sans',ui-sans-serif,system-ui,sans-serif;
-    --r:6px; --r-lg:10px;
+    /* Clockwork brand tokens — kept in sync with the Inspector's :root block.
+       Colour roles follow the same house rule throughout: navy is identity
+       and headings, green is anything interactive or actionable, grey is
+       inert data. Severity (--good/--warn/--bad) is a separate dimension
+       from brand colour and is never substituted for it. */
+    --bg:#fafbfc; --surface:#ffffff; --surface-soft:#f7f9fc; --surface-mute:#eef1f5;
+    --ink:#101828; --ink-2:#344054; --ink-3:#667085; --ink-4:#98a2b3; --ink-5:#d0d5dd;
+    --line:#e4e7ec; --line-2:#d0d5dd;
+
+    --brand:#49af5e; --brand-dk:#3d9850; --brand-lt:#eaf7ee; --brand-glow:rgba(73,175,94,0.18);
+    --navy:#394999; --navy-deep:#2e3b7d; --heading:var(--navy);
+
+    --good:#16a05f; --good-lt:#e7f6ee; --good-bd:#b8e2c8;
+    --warn:#b76e00; --warn-lt:#fdf3e2; --warn-bd:#f4dba1;
+    --bad:#c4271b;  --bad-lt:#fdecea;  --bad-bd:#f4b9b3;
+
+    --mono:'Geist Mono','JetBrains Mono',ui-monospace,monospace;
+    --sans:'Geist',-apple-system,BlinkMacSystemFont,ui-sans-serif,system-ui,sans-serif;
+    --r:6px; --r-lg:10px; --r-full:999px;
   }
-  @media (prefers-color-scheme:dark) {
-    :root {
-      --bg:#191918; --surface:#242422; --ink:#f0eeea; --ink-2:#b8b6b0; --ink-3:#6e6c66;
-      --line:#333330; --line-2:#444440; --brand:#e8613a; --brand-dk:#f07050; --brand-lt:#2a1a14;
-      --good:#3aaa6a; --good-lt:#0e2418; --warn:#d4a030; --warn-lt:#241c08;
-    }
+  [data-theme="dark"] {
+    --bg:#0b0f19; --surface:#121824; --surface-soft:#1a2232; --surface-mute:#242f41;
+    --ink:#f9fafb; --ink-2:#e5e7eb; --ink-3:#9ca3af; --ink-4:#6b7280; --ink-5:#374151;
+    --line:#1f293d; --line-2:#374151;
+
+    /* Green reads fine unchanged on dark; navy has to lift for legibility
+       against a near-black surface, same rule as the Inspector. */
+    --brand:#49af5e; --brand-dk:#5cc270; --brand-lt:#0f2a1a; --brand-glow:rgba(73,175,94,0.25);
+    --navy:#7b8ad6; --navy-deep:#98a5e2; --heading:#aab4e8;
+
+    --good:#34d27a; --good-lt:#0d2e1c; --good-bd:#1a5c35;
+    --warn:#f5a623; --warn-lt:#2c1f06; --warn-bd:#5c3d0a;
+    --bad:#f87171;  --bad-lt:#2d0e0e;  --bad-bd:#5c1f1f;
   }
   html,body { height:100%; }
   body { font-family:var(--sans); background:var(--bg); color:var(--ink); font-size:14px; line-height:1.6; height:100vh; overflow:hidden; display:flex; flex-direction:column; }
-  header { padding:20px 28px 18px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:baseline; gap:14px; }
-  .logo { font-size:15px; font-weight:600; color:var(--ink); letter-spacing:-0.01em; }
-  .logo span { color:var(--brand); }
-  .tagline { font-size:12px; color:var(--ink-3); }
-  main { flex:1; display:grid; grid-template-columns:1fr 1fr; min-height:0; }
-  .panel { display:flex; flex-direction:column; border-right:1px solid var(--line); min-height:0; }
-  .panel:last-child { border-right:none; }
-  .panel-header { padding:14px 20px 12px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+  header { padding:14px 28px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:center; gap:14px; }
+  .header-brand { display:flex; align-items:center; gap:11px; }
+  .cw-mark { flex-shrink:0; }
+  .header-brand h1 { font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--ink); line-height:1.3; }
+  .header-brand h1 .wm-clockwork { color:var(--navy); font-weight:700; }
+  .logo { display:none; } /* superseded by .header-brand */
+  .tagline { font-size:12px; color:var(--ink-3); margin-top:1px; }
+  .header-spacer { margin-left:auto; }
+  .theme-toggle-btn {
+    background:var(--surface-mute); border:1px solid var(--line); color:var(--ink-2);
+    padding:5px 10px; border-radius:var(--r); cursor:pointer; font-family:var(--sans);
+    font-size:12px; font-weight:500; display:inline-flex; align-items:center; gap:5px;
+    transition:background .15s,color .15s; line-height:1;
+  }
+  .theme-toggle-btn:hover { background:var(--line); color:var(--ink); }
+  main { flex:1; display:flex; flex-direction:column; min-height:0; overflow-y:auto; }
+  .file-bar { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; gap:16px; flex-shrink:0; }
+  .file-bar-info { display:flex; align-items:baseline; gap:10px; min-width:0; }
+  .loaded-filename { font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .loaded-meta { font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+  .file-bar-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  .settings-toggle-btn { display:flex; align-items:center; gap:7px; padding:6px 12px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); cursor:pointer; font-family:var(--sans); }
+  .settings-toggle-btn:hover { border-color:var(--line-2); background:var(--surface-soft); }
+  .settings-toggle-btn .settings-chevron { transition:transform .15s; color:var(--ink-3); }
+  .settings-toggle-btn.open .settings-chevron { transform:rotate(180deg); }
   .panel-title { font-size:11px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.08em; }
-  .drop-zone { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:40px 28px; border:2px dashed var(--line-2); border-radius:var(--r-lg); margin:20px; cursor:pointer; transition:border-color .15s,background .15s; }
+  .drop-zone { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:40px 28px; border:2px dashed var(--line-2); border-radius:var(--r-lg); margin:20px auto; max-width:640px; width:calc(100% - 40px); cursor:pointer; transition:border-color .15s,background .15s; }
   .drop-zone:hover,.drop-zone.drag-over { border-color:var(--brand); background:var(--brand-lt); }
   .drop-icon { width:40px; height:40px; color:var(--ink-3); }
   .drop-zone:hover .drop-icon,.drop-zone.drag-over .drop-icon { color:var(--brand); }
@@ -42,14 +80,11 @@
   .btn-choose { padding:7px 16px; border:1px solid var(--line-2); border-radius:var(--r); background:var(--surface); color:var(--ink-2); font-size:12px; font-family:var(--sans); cursor:pointer; }
   .btn-choose:hover { border-color:var(--brand); color:var(--brand); }
   #file-input { display:none; }
-  .settings-collapse { flex-shrink:0; overflow:hidden; }
-  .settings-collapse.open { flex:1; min-height:0; display:flex; flex-direction:column; }
-  .settings-summary { padding:14px 20px 12px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none; flex-shrink:0; }
-  .settings-chevron { transition:transform .15s; color:var(--ink-3); }
-  .settings-collapse.open .settings-chevron { transform:rotate(180deg); }
-  .settings-body { display:none; flex:1; overflow-y:auto; padding:16px 20px; min-height:0; }
-  .settings-collapse.open .settings-body { display:block; flex:1; overflow-y:auto; }
-  .pattern-group { margin-bottom:20px; }
+  .settings-collapse { flex-shrink:0; overflow:hidden; max-height:0; transition:max-height .2s ease; border-bottom:1px solid transparent; }
+  .settings-collapse.open { max-height:60vh; overflow-y:auto; border-bottom:1px solid var(--line); }
+  .settings-body { padding:18px 20px; }
+  .pattern-group-full { margin-bottom:18px; }
+  .pattern-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:24px; }
   .pattern-group-label { font-size:10px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.07em; margin-bottom:8px; }
   .pattern-row { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--line); }
   .pattern-row:last-child { border-bottom:none; }
@@ -68,25 +103,24 @@
   .custom-tag-remove { background:none; border:none; color:var(--brand); cursor:pointer; padding:0; font-size:14px; line-height:1; opacity:.7; }
   .custom-tag-remove:hover { opacity:1; }
   #custom-tags { margin-top:6px; }
-  .results-body { flex:1; overflow-y:auto; }
+  .findings-panel { display:flex; flex-direction:column; }
+  .panel-header { padding:14px 20px 12px; border-bottom:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+  .results-body { flex:1; }
   .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:8px; padding:40px 28px; color:var(--ink-3); font-size:13px; text-align:center; }
   .finding { border-bottom:1px solid var(--line); padding:12px 20px; }
   .finding:last-child { border-bottom:none; }
   .finding-meta { display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap; }
   .badge { display:inline-block; padding:2px 7px; border-radius:4px; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
-  .badge-high   { background:#fdecea; color:#a0281c; }
-  .badge-medium { background:#fff3cd; color:#7a4c00; }
-  @media (prefers-color-scheme:dark) {
-    .badge-high   { background:#2a0e0c; color:#f08070; }
-    .badge-medium { background:#201808; color:#d4a040; }
-  }
+  .badge-high   { background:var(--bad-lt); color:var(--bad); }
+  .badge-medium { background:var(--warn-lt); color:var(--warn); }
   .finding-kind { font-size:11px; color:var(--ink-3); font-weight:500; }
-  .finding-location { font-size:11px; color:var(--ink-3); margin-left:auto; }
-  .finding-preview { font-family:var(--mono); font-size:11px; color:var(--ink-2); background:var(--bg); border:1px solid var(--line); border-radius:var(--r); padding:6px 10px; margin-top:6px; word-break:break-all; white-space:pre-wrap; max-height:60px; overflow:hidden; }
+  .finding-location { font-size:11px; color:var(--ink-3); }
+  .finding-location::before { content:'\00b7'; margin-right:8px; color:var(--ink-4); }
+  .finding-preview { font-family:var(--mono); font-size:11px; color:var(--ink-2); background:var(--bg); border:1px solid var(--line); border-radius:var(--r); padding:6px 10px; margin-top:6px; word-break:break-all; white-space:pre-wrap; max-height:200px; overflow-y:auto; line-height:1.6; }
   .finding-note { font-size:11px; color:var(--ink-3); margin-top:4px; }
   footer { padding:12px 20px; border-top:1px solid var(--line); background:var(--surface); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0; }
   .status-text { font-size:12px; color:var(--ink-3); flex:1; }
-  .status-count { font-weight:600; color:var(--brand); }
+  .status-count { font-weight:600; color:var(--bad); }
   .status-ok { color:var(--good); }
   .btn { padding:8px 16px; border-radius:var(--r); font-size:12px; font-family:var(--sans); cursor:pointer; border:1px solid var(--line-2); background:transparent; color:var(--ink-2); }
   .btn:hover { border-color:var(--ink-3); }
@@ -100,7 +134,7 @@
   .summary-bar { padding:10px 20px; border-bottom:1px solid var(--line); background:var(--bg); display:flex; gap:20px; flex-shrink:0; }
   .summary-stat { display:flex; flex-direction:column; gap:1px; }
   .summary-stat-val { font-size:18px; font-weight:600; color:var(--ink); line-height:1; }
-  .summary-stat-val.red { color:var(--brand); }
+  .summary-stat-val.red { color:var(--bad); }
   .summary-stat-label { font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.06em; }
   .section-header { padding:8px 20px; font-size:10px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:.07em; background:var(--bg); border-bottom:1px solid var(--line); position:sticky; top:0; }
   .no-file-prompt { padding:24px 20px; font-size:12px; color:var(--ink-3); text-align:center; }
@@ -123,7 +157,7 @@
   .summary-line-val { font-size:20px; font-weight:600; color:var(--ink); }
   .summary-line-label { font-size:11px; color:var(--ink-3); }
   .summary-match-badge { display:inline-block; padding:2px 8px; border-radius:var(--r); background:var(--good-lt); color:var(--good); font-size:11px; font-weight:600; }
-  #right-panel { position:relative; }
+  #findings-panel { position:relative; }
   .copied-flash { color:var(--good) !important; }
   .disclaimer { flex-shrink:0; padding:9px 20px; border-top:1px solid var(--line); background:var(--bg); font-size:11px; color:var(--ink-3); line-height:1.45; }
 </style>
@@ -131,54 +165,48 @@
 <body>
 
 <header>
-  <div class="logo">FileMaker XML <span>Scrubber</span></div>
-  <div class="tagline">Strip credentials from FileMaker XML before sharing with AI tools</div>
+  <div class="header-brand">
+    <svg class="cw-mark" width="26" height="26" viewBox="0 0 1700 1700" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clockwork"><defs><clipPath id="cwclip"><path transform="matrix(1,0,0,-1,0,1700)" d="M0 1700H1700V0H0Z"/></clipPath></defs><g inkscape:groupmode="layer" inkscape:label="Layer 1"><g clip-path="url(#cwclip)"><path transform="matrix(1,0,0,-1,1356.4618,496.62013)" d="M0 0-406.175-476.056C-433.779-508.41-482.33-512.397-514.843-484.98L-566.673-441.273C-599.319-413.743-603.467-364.961-575.937-332.315L-167.015 152.608C-137.136 188.04-83.012 189.407-51.384 155.527L-2.302 102.953C24.53 74.212 25.521 29.911 0 0" fill="#49af5e"/><path transform="matrix(1,0,0,-1,854.1509,1060.6453)" d="M0 0-276.525 232.093C-283.608 238.037-284.53 248.597-278.586 255.68L-157.393 400.074C-151.449 407.156-140.889 408.079-133.806 402.135L142.719 170.042C149.802 164.098 150.724 153.537 144.78 146.455L23.587 2.061C17.643-5.022 7.082-5.944 0 0" fill="#49af5e"/><path transform="matrix(1,0,0,-1,1415.4699,854.7839)" stroke-width="220.547" stroke-linecap="butt" stroke-miterlimit="10" stroke-linejoin="miter" fill="none" stroke="#2f4495" d="M0 0C0-311.648-252.64-564.288-564.288-564.288-875.936-564.288-1128.576-311.648-1128.576 0-1128.576 311.648-875.936 564.288-564.288 564.288"/><path transform="matrix(1,0,0,-1,1415.4699,854.7839)" stroke-width="220.547" stroke-linecap="butt" stroke-miterlimit="10" stroke-linejoin="miter" fill="none" stroke="#394999" d="M0 0C0-311.648-252.64-564.288-564.288-564.288-875.936-564.288-1128.576-311.648-1128.576 0-1128.576 311.648-875.936 564.288-564.288 564.288"/></g></g></svg>
+    <div>
+      <h1><span class="wm-clockwork">Clockwork</span> Scrubber</h1>
+      <div class="tagline">Strip credentials from FileMaker XML before sharing with AI tools</div>
+    </div>
+  </div>
+  <div class="header-spacer"></div>
+  <button id="theme-toggle" class="theme-toggle-btn" aria-label="Toggle theme"><span class="theme-icon">🌙</span><span class="theme-text">Dark</span></button>
 </header>
 
 <main>
-  <div class="panel" id="left-panel">
-    <div class="panel-header">
-      <span class="panel-title">Input</span>
-      <button class="btn" id="btn-clear" style="display:none" onclick="clearFile()">Clear</button>
+  <div class="file-bar" id="file-bar" style="display:none">
+    <div class="file-bar-info">
+      <span class="loaded-filename" id="loaded-filename"></span>
+      <span class="loaded-meta" id="loaded-meta"></span>
     </div>
-
-    <div class="drop-zone" id="drop-zone"
-         onclick="document.getElementById('file-input').click()"
-         ondragover="handleDragOver(event)" ondragleave="handleDragLeave()" ondrop="handleDrop(event)">
-      <svg class="drop-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M26 6H10a3 3 0 0 0-3 3v22a3 3 0 0 0 3 3h20a3 3 0 0 0 3-3V14z"/>
-        <path d="M26 6v8a1 1 0 0 0 1 1h6"/><path d="M16 24l4-4 4 4M20 20v10"/>
-      </svg>
-      <div class="drop-label"><strong>Drop an XML file here</strong><br>or click to choose</div>
-      <div class="drop-sub">FileMaker DDR XML, script XML, clipboard exports</div>
-      <button class="btn-choose" onclick="event.stopPropagation();document.getElementById('file-input').click()">Choose file</button>
-      <input type="file" id="file-input" accept=".xml,text/xml,application/xml" onchange="handleFileInput(event)">
+    <div class="file-bar-actions">
+      <button class="settings-toggle-btn" id="settings-toggle-btn" onclick="toggleSettings()">
+        <span class="panel-title">Detection settings</span>
+        <svg class="settings-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5l3 3 3-3"/></svg>
+      </button>
+      <button class="btn" id="btn-clear" onclick="clearFile()">Clear</button>
     </div>
+  </div>
 
-    <div id="loaded-info" style="display:none;flex:1;flex-direction:column;min-height:0;overflow:hidden;">
-      <div class="loaded-header">
-        <div class="loaded-filename" id="loaded-filename"></div>
-        <div class="loaded-meta" id="loaded-meta"></div>
-      </div>
-      <div id="settings-collapse" class="settings-collapse">
-        <div class="settings-summary" onclick="toggleSettings()" style="border-top:1px solid var(--line);">
-          <span class="panel-title">Detection settings</span>
-          <svg class="settings-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5l3 3 3-3"/></svg>
-        </div>
-        <div class="settings-body">
+  <div id="settings-collapse" class="settings-collapse">
+    <div class="settings-body">
 
-        <div class="pattern-group">
-          <div class="pattern-group-label">Scan intensity</div>
-          <div class="intensity-row">
-            <span class="intensity-label">Match threshold</span>
-            <div class="intensity-pills">
-              <button class="pill" id="pill-strict" onclick="setIntensity('strict')">Strict</button>
-              <button class="pill active" id="pill-normal" onclick="setIntensity('normal')">Normal</button>
-              <button class="pill" id="pill-aggressive" onclick="setIntensity('aggressive')">Aggressive</button>
-            </div>
+      <div class="pattern-group pattern-group-full">
+        <div class="pattern-group-label">Scan intensity</div>
+        <div class="intensity-row">
+          <span class="intensity-label">Match threshold</span>
+          <div class="intensity-pills">
+            <button class="pill" id="pill-strict" onclick="setIntensity('strict')">Strict</button>
+            <button class="pill active" id="pill-normal" onclick="setIntensity('normal')">Normal</button>
+            <button class="pill" id="pill-aggressive" onclick="setIntensity('aggressive')">Aggressive</button>
           </div>
         </div>
+      </div>
 
+      <div class="pattern-grid">
         <div class="pattern-group">
           <div class="pattern-group-label">Known API key formats</div>
           <div class="pattern-row">
@@ -290,6 +318,11 @@
             <span class="pattern-desc">Plugin licence keys</span>
           </div>
           <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-curlcred" checked>
+            <span class="pattern-name">CURL.SetOptionPassword / etc</span>
+            <span class="pattern-desc">SFTP/CURL credentials, traced to source</span>
+          </div>
+          <div class="pattern-row">
             <input type="checkbox" class="pattern-toggle" id="pat-urlhost" checked>
             <span class="pattern-name">https://hostname/...</span>
             <span class="pattern-desc">Internal URLs → https://[HOST]/...</span>
@@ -309,13 +342,25 @@
           </div>
           <div id="custom-tags"></div>
         </div>
+      </div>
 
-      </div>
-      </div>
     </div>
   </div>
 
-  <div class="panel" id="right-panel">
+  <div class="drop-zone" id="drop-zone"
+       onclick="document.getElementById('file-input').click()"
+       ondragover="handleDragOver(event)" ondragleave="handleDragLeave()" ondrop="handleDrop(event)">
+    <svg class="drop-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M26 6H10a3 3 0 0 0-3 3v22a3 3 0 0 0 3 3h20a3 3 0 0 0 3-3V14z"/>
+      <path d="M26 6v8a1 1 0 0 0 1 1h6"/><path d="M16 24l4-4 4 4M20 20v10"/>
+    </svg>
+    <div class="drop-label"><strong>Drop an XML file here</strong><br>or click to choose</div>
+    <div class="drop-sub">FileMaker DDR XML, script XML, clipboard exports</div>
+    <button class="btn-choose" onclick="event.stopPropagation();document.getElementById('file-input').click()">Choose file</button>
+    <input type="file" id="file-input" accept=".xml,text/xml,application/xml" onchange="handleFileInput(event)">
+  </div>
+
+  <div class="findings-panel" id="findings-panel" style="display:none">
     <div class="panel-header">
       <span class="panel-title">Findings</span>
     </div>
@@ -334,7 +379,7 @@
     Download redacted XML
   </button>
 </footer>
-<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.1 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
+<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.2 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
 
 <script>
 // ============================================================
@@ -404,7 +449,7 @@ function excerpt(b){ var s=(b||'').trim().replace(/\s+/g,' '); return s.length>2
 // findings show what was redacted (secret masked), not the start of the calc,
 // which is often a documentation comment.
 function previewRedactions(text, maxWins){
-    maxWins=maxWins||2;
+    maxWins=maxWins||6;
     var re=/\[REDACTED\]|\[HOST\]/g, marks=[], m;
     while((m=re.exec(text))!==null) marks.push([m.index, m.index+m[0].length]);
     if(marks.length===0) return excerpt(text);
@@ -413,10 +458,35 @@ function previewRedactions(text, maxWins){
         var a=Math.max(0, marks[i][0]-36), e=Math.min(text.length, marks[i][1]+36);
         wins.push((a>0?'\u2026':'')+text.slice(a,e).replace(/\s+/g,' ').trim()+(e<text.length?'\u2026':''));
     }
-    var more=marks.length>maxWins ? '   (+'+(marks.length-maxWins)+' more)' : '';
-    return wins.join('     ')+more;
+    var more=marks.length>maxWins ? '(+'+(marks.length-maxWins)+' more not shown)' : '';
+    return wins.concat(more?[more]:[]).join('\n');
 }
 function isBareString(t){ t=(t||'').trim(); return /^"([^"\\]|\\.)*"$/.test(t)||/^'([^'\\]|\\.)*'$/.test(t); }
+
+// Splits the inside of a function call's parens into its top-level,
+// semicolon-separated arguments, respecting nested parens and string
+// literals so a comma or semicolon inside a quoted string or a nested
+// call doesn't split where it shouldn't.
+function splitTopLevelArgs(span){
+    var args=[], depth=0, cur='', inStr=false, q='', esc=false;
+    for(var i=0;i<span.length;i++){
+        var c=span[i];
+        if(inStr){
+            cur+=c;
+            if(esc) esc=false;
+            else if(c==='\\') esc=true;
+            else if(c===q) inStr=false;
+            continue;
+        }
+        if(c==='"'||c==="'"){ inStr=true; q=c; cur+=c; continue; }
+        if(c==='('){ depth++; cur+=c; continue; }
+        if(c===')'){ depth--; cur+=c; continue; }
+        if(c===';' && depth===0){ args.push(cur); cur=''; continue; }
+        cur+=c;
+    }
+    if(cur.trim()!=='' || args.length>0) args.push(cur);
+    return args.map(function(a){ return a.trim(); });
+}
 function dominantCat(cats){ for(var i=0;i<cats.length;i++){ if(cats[i]!=='url') return cats[i]; } return cats[0]||'credential'; }
 function noteFromCats(cats){
     var hasKey=cats.some(function(c){return c!=='url';}), hasUrl=cats.indexOf('url')!==-1;
@@ -687,6 +757,136 @@ function redactDocument(sourceDoc, cfg){
         Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ if(!done.has(el)) processRegister(el, 'Plugin registration key (custom function)'); });
     }
 
+    // 1.6: CURL/SFTP credential-consuming calls (MBS CURL.SetOptionPassword,
+    // CURL.SetOptionUserName, CURL.SetOptionXOAuth2Bearer). These pass a
+    // credential as a positional argument, not keyword=value, so the generic
+    // passes below can't see them. The argument shows up in three shapes:
+    //   literal   MBS("CURL.SetOptionPassword"; $curl; "hunter2")
+    //             -> redact right here, same as a Register call.
+    //   variable  MBS("CURL.SetOptionPassword"; $curl; $password)
+    //             -> the real value isn't in this calc at all. Walk backward
+    //             through THIS script's own step list for the nearest
+    //             Set Variable [$password; ...] above this step and redact
+    //             there instead. This is the fix for the original SFTP
+    //             incident: a plain-word password has no shape a value-based
+    //             scan can catch, so we key on the credential-consuming call
+    //             instead and trace back to where the value actually lives.
+    //   field     MBS("CURL.SetOptionPassword"; $curl; Table::Password)
+    //             -> nothing to redact; the secret lives in data, not this
+    //             file. Flagged so a reviewer knows where it comes from.
+    // Scope: the trace only walks the current script's own steps. A variable
+    // set by a calling script, or a global $$variable set elsewhere, will not
+    // be found -- flagged as unresolved rather than silently missed.
+    if(cfg.curlcred){
+        var CRED_CALLS=[
+            { match:/CURL\.SetOptionPassword/i,      kind:'SFTP/CURL password',      severity:'high'   },
+            { match:/CURL\.SetOptionXOAuth2Bearer/i, kind:'OAuth bearer token',      severity:'high'   },
+            { match:/CURL\.SetOptionUserName/i,      kind:'SFTP/CURL username',      severity:'medium' }
+        ];
+        var findEnclosingScript=function(el){
+            var n=el; while(n){ if(n.nodeType===1 && n.tagName==='Script') return n; n=n.parentNode; } 
+            // A bare clipboard paste (a script copied straight out of the Script
+            // Workspace, or Andy Kear's own script-XML skill output) has no
+            // <Script> wrapper at all -- it's just a flat list of <Step>
+            // elements under the fmxmlsnippet root. If the WHOLE document has
+            // no <Script> element anywhere, it's safe to treat the root as the
+            // script container, since there's only one script's worth of steps
+            // in the file. If the document DOES have real <Script> wrappers
+            // elsewhere but this particular calc sits outside all of them,
+            // that's ambiguous -- don't guess which script it belongs to.
+            if(!doc.querySelector('Script')) return doc.documentElement;
+            return null;
+        };
+        var findStepAncestor=function(el){ var n=el; while(n){ if(n.nodeType===1 && n.tagName==='Step') return n; n=n.parentNode; } return null; };
+        var traceVariableSource=function(varName, scriptEl, beforeStep){
+            var clean=varName.replace(/^\$+/,'').replace(/\[.*$/,'').trim();
+            var steps=Array.from(scriptEl.querySelectorAll('Step'));
+            var cutIdx=steps.indexOf(beforeStep);
+            if(cutIdx===-1) cutIdx=steps.length;
+            for(var i=cutIdx-1;i>=0;i--){
+                var st=steps[i];
+                if(st.getAttribute('id')!=='141') continue;
+                var nameEl=st.querySelector('Name');
+                var stVar=(nameEl?nameEl.textContent:'').replace(/^\$+/,'').replace(/\[.*$/,'').trim();
+                if(stVar===clean) return st.querySelector('Value > Calculation');
+            }
+            return null;
+        };
+        var processCurlCreds=function(el){
+            var txt=el.textContent||'';
+            if(!txt || !/CURL\.SetOption(Password|UserName|XOAuth2Bearer)/i.test(txt)) return;
+            var stepEl=findStepAncestor(el);
+            var scriptEl=stepEl?findEnclosingScript(stepEl):null;
+            var nameRe=/\bMBS\b/g, m;
+            while((m=nameRe.exec(txt))!==null){
+                var i=m.index+m[0].length;
+                while(i<txt.length && /\s/.test(txt[i])) i++;
+                if(txt[i]!=='(') continue;
+                var depth=0, j=i, inStr=false, q='', esc=false;
+                for(; j<txt.length; j++){
+                    var c=txt[j];
+                    if(inStr){ if(esc) esc=false; else if(c==='\\') esc=true; else if(c===q) inStr=false; continue; }
+                    if(c==='"'||c==="'"){ inStr=true; q=c; continue; }
+                    if(c==='(') depth++;
+                    else if(c===')'){ depth--; if(depth===0){ j++; break; } }
+                }
+                var span=txt.slice(i+1,j-1);
+                var args=splitTopLevelArgs(span);
+                if(args.length<3) continue;
+                var fnLit=args[0];
+                var credDef=null;
+                for(var k=0;k<CRED_CALLS.length;k++){ if(CRED_CALLS[k].match.test(fnLit)){ credDef=CRED_CALLS[k]; break; } }
+                if(!credDef) continue;
+                var valueArg=args[2];
+                if(isBareString(valueArg)){
+                    var q2=valueArg[0];
+                    var idx=txt.indexOf(valueArg, i);
+                    if(idx===-1 || idx>j) continue;
+                    var newTxt=txt.slice(0,idx)+q2+'[REDACTED]'+q2+txt.slice(idx+valueArg.length);
+                    setCalcText(el,newTxt,doc); tally1('password',1);
+                    changes.push({ severity:credDef.severity, kind:credDef.kind, category:'password',
+                        location:locationOf(el), count:1, before:previewRedactions(newTxt),
+                        note:'Literal argument to '+fnLit+' \u2014 verify before sharing' });
+                    txt=newTxt; nameRe.lastIndex=idx+11;
+                } else if(/^\${1,2}[A-Za-z_][A-Za-z0-9_]*$/.test(valueArg)){
+                    var srcCalc=scriptEl?traceVariableSource(valueArg, scriptEl, stepEl):null;
+                    if(srcCalc && !done.has(srcCalc)){
+                        var srcTxt=srcCalc.textContent||'';
+                        if(isBareString(srcTxt)){
+                            setCalcText(srcCalc,'"[REDACTED]"',doc); done.add(srcCalc); tally1('password',1);
+                            changes.push({ severity:credDef.severity, kind:credDef.kind+' (traced to source)', category:'password',
+                                location:locationOf(srcCalc), count:1, before:'"[REDACTED]"',
+                                note:'Variable '+valueArg+' is passed to '+fnLit+' \u2014 redacted at its source assignment, not where it\u2019s used' });
+                        } else {
+                            var r=redactAllLiterals(srcTxt);
+                            if(r.count>0){
+                                setCalcText(srcCalc,r.text,doc); done.add(srcCalc); tally1('password',r.count);
+                                changes.push({ severity:credDef.severity, kind:credDef.kind+' (traced to source)', category:'password',
+                                    location:locationOf(srcCalc), count:r.count, before:previewRedactions(r.text),
+                                    note:'Variable '+valueArg+' is passed to '+fnLit+' \u2014 literals in its source assignment redacted' });
+                            }
+                        }
+                    } else if(!srcCalc){
+                        // Covers two cases equally: a real script where the
+                        // variable's source genuinely isn't in this script, and
+                        // a document with no usable script context at all (e.g.
+                        // a calc sitting outside every <Script> wrapper in a
+                        // multi-script file). Either way, say so rather than
+                        // going quiet.
+                        changes.push({ severity:credDef.severity, kind:credDef.kind+' (unresolved)', category:'password',
+                            location:locationOf(el), count:0, before:previewRedactions(txt),
+                            note:'Variable '+valueArg+' is passed to '+fnLit+' but its source could not be found \u2014 check a calling script, a global, or a field, and verify by hand' });
+                    }
+                } else if(/::/.test(valueArg)){
+                    changes.push({ severity:'medium', kind:credDef.kind+' (field reference)', category:'password',
+                        location:locationOf(el), count:0, before:previewRedactions(txt),
+                        note:'This call reads its value from field '+valueArg+' \u2014 nothing to redact here since the secret lives in your data, not this file, but reviewers should know where it comes from' });
+                }
+            }
+        };
+        Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ processCurlCreds(el); });
+    }
+
     // 2 + 3 + 6: known keys, inline keyword=literal, URLs/IPs across all calcs + custom functions
     Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ processCalcEl(el, null); });
     Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ processCalcEl(el, 'Custom function body'); });
@@ -851,7 +1051,8 @@ function loadFile(file){
         }
         state.rawText=candidate; state.fileName=file.name; state.doc=doc;
         $('drop-zone').style.display='none';
-        var li=$('loaded-info'); li.style.display='flex';
+        $('file-bar').style.display='flex';
+        $('findings-panel').style.display='flex';
         $('btn-clear').style.display='inline-block';
         $('btn-rescan').style.display='inline-block';
         $('btn-copy').style.display='inline-block';
@@ -867,7 +1068,10 @@ function loadFile(file){
 function clearFile(){
     state={ rawText:null, fileName:null, doc:null, findings:[], customKws:state.customKws, lastSummary:null, intensity:state.intensity, lastRun:null, lastRedactedXml:null };
     $('drop-zone').style.display='flex';
-    $('loaded-info').style.display='none';
+    $('file-bar').style.display='none';
+    $('findings-panel').style.display='none';
+    $('settings-collapse').classList.remove('open');
+    $('settings-toggle-btn').classList.remove('open');
     $('btn-clear').style.display='none';
     $('btn-rescan').style.display='none';
     $('btn-copy').style.display='none';
@@ -882,6 +1086,7 @@ function clearFile(){
 // ── SETTINGS PANEL ───────────────────────────────────────────
 function toggleSettings(){
     $('settings-collapse').classList.toggle('open');
+    $('settings-toggle-btn').classList.toggle('open');
 }
 
 function setIntensity(level){
@@ -943,7 +1148,7 @@ function buildConfig(){
         inline:$('pat-inline').checked, url:$('pat-urlhost').checked,
         textnode:$('pat-textnode').checked, connstr:$('pat-connstr').checked,
         plugin:$('pat-plugin').checked, azure:$('pat-connstr').checked,
-        pem:$('pat-pemkey').checked
+        pem:$('pat-pemkey').checked, curlcred:$('pat-curlcred').checked
     };
 }
 
@@ -981,15 +1186,15 @@ function renderFindings(){
         '<div class="summary-stat"><div class="summary-stat-val '+(high>0?'red':'')+'">'+high+'</div><div class="summary-stat-label">High</div></div>'+
         '<div class="summary-stat"><div class="summary-stat-val">'+medium+'</div><div class="summary-stat-label">Medium</div></div>'+
         '<div class="summary-stat"><div class="summary-stat-val red">'+redacted+'</div><div class="summary-stat-label">Values</div></div>'+
-        '</div><div class="section-header">Each value below will be redacted. CDATA and surrounding logic are preserved</div>';
+        '</div><div class="section-header">Values below are redacted automatically. A few are flagged for manual review instead, where nothing in this file can be safely redacted \u2014 see the note under each</div>';
 
     findings.forEach(function(f){
         var bc=f.severity==='high'?'badge-high':'badge-medium';
         var cnt=(f.count&&f.count>1)?' <span class="finding-kind">('+f.count+' values)</span>':'';
+        var loc=f.location?'<span class="finding-location">'+esc(f.location)+'</span>':'';
         html+='<div class="finding"><div class="finding-meta">'+
             '<span class="badge '+bc+'">'+f.severity+'</span>'+
-            '<span class="finding-kind">'+esc(f.kind)+'</span>'+cnt+
-            '<span class="finding-location">'+esc(f.location)+'</span>'+
+            '<span class="finding-kind">'+esc(f.kind)+'</span>'+cnt+loc+
             '</div><div class="finding-preview">'+esc(f.before)+'</div>'+
             '<div class="finding-note">'+esc(f.note)+'</div></div>';
     });
@@ -1082,11 +1287,34 @@ function showSummaryOverlay(){
         '<button class="btn" onclick="closeSummaryOverlay()">Close</button></div>';
 
     var existing=$('summary-overlay'); if(existing) existing.remove();
-    $('right-panel').insertAdjacentHTML('beforeend', html);
+    $('findings-panel').insertAdjacentHTML('beforeend', html);
 }
 
 function closeSummaryOverlay(){ var o=$('summary-overlay'); if(o) o.remove(); }
 
+// ── Theme toggle — same mechanism as the Inspector, separate storage key
+// so the two tools' preferences don't collide even if a browser ever
+// shares localStorage across local files. ──────────────────────────────
+(function initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem('cw-scrubber-theme'); } catch (e) {}
+    let systemDark = false;
+    try { systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    applyTheme(saved || (systemDark ? 'dark' : 'light'));
+})();
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('cw-scrubber-theme', theme); } catch (e) {}
+    document.querySelectorAll('.theme-icon').forEach(function(el) { el.textContent = theme === 'dark' ? '☀️' : '🌙'; });
+    document.querySelectorAll('.theme-text').forEach(function(el) { el.textContent = theme === 'dark' ? 'Light' : 'Dark'; });
+}
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+document.addEventListener('click', function(e) {
+    if (e.target.closest('#theme-toggle')) toggleTheme();
+});
 </script>
 </body>
 </html>

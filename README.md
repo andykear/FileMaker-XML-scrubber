@@ -77,6 +77,12 @@ These depend on where a value sits or what it is named, so they are matched only
 - **Connection string passwords** (`password=` and `pwd=` in DSN and connection attributes)
 - **Azure storage keys**: the `AccountKey=` and `SharedAccessSignature=` segments of a connection string, leaving the endpoint and account name as context
 - **Plugin licence keys**: the literal arguments to `MBS("Register"; ...)` and any `*_Register(...)` activation call, with the MBS selector preserved
+- **SFTP/CURL credentials passed to MBS**, such as `MBS("CURL.SetOptionPassword"; ...)`, `CURL.SetOptionUserName`, and `CURL.SetOptionXOAuth2Bearer`. These pass a credential as a positional argument rather than `keyword = "value"`, so plain keyword matching can't see them, and a plain-word password has no shape a value-based scan would catch either. Three cases are handled:
+  - a literal argument is redacted in place
+  - a variable argument (the common case) is traced backward through the same script's own step list to the nearest `Set Variable` that assigned it, and the value is redacted there, at its source, not where it's used
+  - a field reference (`Table::Password`) has nothing to redact, since the value lives in your data rather than this file, so it's flagged for manual review instead
+  
+  The trace is scoped to the current script only. A variable set by a calling script, or a global `$$variable` set elsewhere, will show up as unresolved rather than being silently missed.
 - **Internal hostnames and private IPs**, replaced with `[HOST]`. Public URLs are left alone
 - **Attributes** whose name matches a credential keyword
 
@@ -91,6 +97,7 @@ This is a heuristic scrubber, not a guarantee. It does not catch:
 - ESS and ODBC data source names beyond the password field
 - Email addresses and SMTP server names
 - Value list contents, schema names, field names or any sensitive literal that does not match a credential shape
+- Credentials passed via a variable set in a *calling* script, or a global `$$variable` set elsewhere in the file. The SFTP/CURL trace only follows the current script's own steps; anything outside that is flagged as unresolved, not redacted
 
 A FileMaker XML export exposes a lot of structure regardless of this tool. Always review the output before sharing it.
 
@@ -150,4 +157,4 @@ Provided as is, with no warranty. The tool may miss values or redact more than y
 
 ---
 
-v1.1 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)
+v1.2 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)
