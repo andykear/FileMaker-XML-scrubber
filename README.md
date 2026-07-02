@@ -5,6 +5,8 @@
 
 A single file, browser-based tool that strips credential values from FileMaker XML before you share it with AI tools or other developers. Everything runs locally in your browser. Nothing is uploaded anywhere.
 
+Created by Andrew Kear of Clockwork Creative Technology and shared openly with the FileMaker/Claris community.
+
 ---
 
 ## What problem does this solve?
@@ -151,7 +153,9 @@ Calculations stay inside CDATA so operators are not re-escaped into entities. If
 
 ## Licence
 
-CC BY 4.0. See [LICENSE](LICENSE).
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — free to use, share, and adapt with attribution.
+
+---
 
 Provided as is, with no warranty. The tool may miss values or redact more than you expect. You are responsible for checking the output before sharing it.
 
