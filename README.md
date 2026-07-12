@@ -60,11 +60,12 @@ These have near zero false positive rates, so they are matched everywhere, inclu
 - **Google** AI keys (`AIza`)
 - **xAI** keys (`xai-`)
 - **Groq** keys (`gsk_`)
-- **AWS** access key IDs (`AKIA`, `ASIA`)
+- **AWS** access key IDs (`AKIA`, `ASIA`). Note this is the key ID, not the secret access key: a plain AWS secret has no reliable standalone shape, so it is caught only when assigned to a name containing `secret` (which `AWS_SECRET_ACCESS_KEY` and `SecretAccessKey` both do)
 - **GitHub** tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`)
 - **Slack** tokens (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-`, `xoxs-`)
 - **Stripe** keys (`sk_live_`, `rk_live_`, `sk_test_`, `rk_test_`)
 - **SendGrid** API keys (`SG.xxxx.xxxx`)
+- **JWT / JWS tokens**: the three-segment `eyJ...` base64url shape, wherever it appears
 - **PEM and SSH private keys** (`-----BEGIN ... PRIVATE KEY-----`), including keys split across concatenated literals
 - **Incoming webhook URLs** for Slack, Discord and Microsoft Teams, where the URL itself carries the auth token
 
@@ -75,8 +76,12 @@ These depend on where a value sits or what it is named, so they are matched only
 - **Configure AI Account** step values (step id 212), fully redacted
 - **Set Variable** steps (step id 141) whose name matches a credential keyword: a single literal is replaced whole, an expression has every literal inside it redacted
 - **Inline keyword assignments** inside calculations, such as `apikey = "value"`, including Let() locals with no `$` prefix
-- **Credential keywords** covered: api key, token, bearer, password, secret, SMTP pass or key, private key, auth key, SSH key, SFTP pass, passphrase, credential, OAuth
-- **Connection string passwords** (`password=` and `pwd=` in DSN and connection attributes)
+- **Credential keywords** covered: api key, token, bearer, authorization, password, secret, SMTP pass or key, private key, auth key, SSH key, SFTP pass, passphrase, credential, OAuth
+- **HTTP header credentials**, wherever header text appears: `Authorization: Bearer/Basic/Token/Digest/OAuth` values, `X-API-Key` and similar key-carrying headers, and `Cookie`/`Set-Cookie` session values. This covers Insert from URL cURL options, including the escaped-quote form `-H \"Authorization: Bearer ...\"`, where the header name identifies the value as a credential regardless of its shape
+- **cURL user options**: the password half of `-u`, `--user` and `--proxy-user user:password`, with the username kept as context
+- **URL passwords**: `scheme://user:password@host` for any scheme (https, ftp, sftp, jdbc, postgres, mongodb and so on). The username stays, the password goes, and an internal host after the `@` still becomes `[HOST]`
+- **Secret-bearing query parameters**: `?api_key=`, `?token=`, `?access_token=`, `?secret=`, `?sig=`, `?signature=`, `?sas=`, `?code=`, `?key=` and session-id parameters. The host is left alone even when public, since the parameter name marks the value as a credential. `key=` and `code=` are deliberately broad and will occasionally redact a non-secret; for a scrubber that is the right failure direction, and every hit is listed in the findings
+- **Connection string credentials** (`password=`, `pwd=`, `AccessToken=`, `AuthenticationToken=` in DSN and connection attributes, plus `user:password@host` inside jdbc-style URLs in those attributes)
 - **Azure storage keys**: the `AccountKey=` and `SharedAccessSignature=` segments of a connection string, leaving the endpoint and account name as context
 - **Plugin licence keys**: the literal arguments to `MBS("Register"; ...)` and any `*_Register(...)` activation call, with the MBS selector preserved
 - **SFTP/CURL credentials passed to MBS**, such as `MBS("CURL.SetOptionPassword"; ...)`, `CURL.SetOptionUserName`, and `CURL.SetOptionXOAuth2Bearer`. These pass a credential as a positional argument rather than `keyword = "value"`, so plain keyword matching can't see them, and a plain-word password has no shape a value-based scan would catch either. Three cases are handled:
@@ -161,4 +166,4 @@ Provided as is, with no warranty. The tool may miss values or redact more than y
 
 ---
 
-v1.2 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)
+v1.3 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)

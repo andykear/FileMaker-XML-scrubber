@@ -232,6 +232,11 @@
             <span class="pattern-desc">SendGrid API keys</span>
           </div>
           <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-jwtkey" checked>
+            <span class="pattern-name">eyJ...&#8202;.&#8202;eyJ...</span>
+            <span class="pattern-desc">JWT / JWS tokens</span>
+          </div>
+          <div class="pattern-row">
             <input type="checkbox" class="pattern-toggle" id="pat-pemkey" checked>
             <span class="pattern-name">BEGIN PRIVATE KEY</span>
             <span class="pattern-desc">PEM / SSH private keys</span>
@@ -305,6 +310,16 @@
             <span class="pattern-desc">SFTP/CURL credentials, traced to source</span>
           </div>
           <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-headercred" checked>
+            <span class="pattern-name">Authorization: / Cookie: / -u</span>
+            <span class="pattern-desc">HTTP header and cURL option credentials</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-urlsecret" checked>
+            <span class="pattern-name">?api_key= / user:pass@</span>
+            <span class="pattern-desc">URL query secrets and URL passwords</span>
+          </div>
+          <div class="pattern-row">
             <input type="checkbox" class="pattern-toggle" id="pat-urlhost" checked>
             <span class="pattern-name">https://hostname/...</span>
             <span class="pattern-desc">Internal URLs → https://[HOST]/...</span>
@@ -361,7 +376,7 @@
     Download redacted XML
   </button>
 </footer>
-<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.2 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
+<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.3 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
 
 <script>
 // ============================================================
@@ -394,6 +409,7 @@ function buildKnownKeyRe(o){
     if(o.stripe) p.push('[sr]k_(?:live|test)_[A-Za-z0-9]{20,}');     // Stripe live + test secret/restricted keys
     if(o.sendgrid) p.push('SG\\.[\\w-]{16,}\\.[\\w-]{16,}');          // SendGrid API key (SG.xxxx.xxxx)
     if(o.pem)    p.push('-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----');   // PEM private key block (RSA/EC/OPENSSH/PKCS8)
+    if(o.jwt)    p.push('eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}'); // JWT/JWS: three base64url segments, header always starts eyJ ({" encoded)
     if(o.webhook){                                                  // incoming-webhook URLs carry their own auth token
         p.push('hooks\\.slack\\.com/services/[A-Za-z0-9/]+');       // Slack
         p.push('discord(?:app)?\\.com/api/webhooks/\\d+/[\\w-]+');  // Discord
@@ -405,7 +421,7 @@ function buildKnownKeyRe(o){
 function kwPartsFrom(a){
     var p=[];
     if(a.apikey)     p.push('api[_-]?key','apikey');
-    if(a.token)      p.push('token','bearer');
+    if(a.token)      p.push('token','bearer','authorization');
     if(a.password)   p.push('password','passwd');
     if(a.secret)     p.push('secret');
     if(a.smtp)       p.push('smtp[_-]?pass','smtp[_-]?key');
@@ -418,7 +434,7 @@ function kwPartsFrom(a){
 function categFromName(name){
     var n=(name||'').toLowerCase();
     if(/api[_-]?key|apikey/.test(n)) return 'api_key';
-    if(/token|bearer/.test(n))       return 'token';
+    if(/token|bearer|authorization/.test(n)) return 'token';
     if(/password|passwd/.test(n))    return 'password';
     if(/secret/.test(n))             return 'secret';
     if(/smtp/.test(n))               return 'smtp';
@@ -526,8 +542,101 @@ function isInternalHost(host){
     return /\.(local|internal|lan|intranet|corp|home|test|example|invalid)$/i.test(host);
 }
 
+// Redact credentials that ride inside HTTP header text. These show up as
+// plain text inside cURL option literals (Insert from URL), MBS CURL header
+// options and concatenated header calculations, so the keyword = "value"
+// pass never sees them: the header name identifies the value as a credential
+// regardless of the value's shape. This is the same failure class as the
+// original SFTP incident, keyed on the consumer rather than the value.
+// Handles the escaped-quote form (-H \"Authorization: Bearer x\") because it
+// runs on raw code-span text, not per string literal: the naive literal
+// splitter in the known-key pass cannot see inside escaped quotes at all.
+// Returns { text, count, cats }.
+function redactHeaderCreds(txt){
+    let count = 0;
+    const cats = [];
+    let t = txt;
+
+    // Authorization / Proxy-Authorization with a scheme keyword. Covers the
+    // header form (Authorization: Bearer x), the assignment form
+    // (Authorization = "Basic x") and the escaped cURL form. The scheme word
+    // is kept as context, only the credential after it is redacted.
+    t = t.replace(/((?:Proxy-)?Authorization\s*[:=]\s*\\?["']?\s*(?:Bearer|Basic|Token|Digest|OAuth)\s+)([^\s"'\\;,&]+)/gi, function(m, pre, val){
+        if(val === '[REDACTED]') return m;
+        count++; cats.push('token');
+        return pre + '[REDACTED]';
+    });
+
+    // API-key style headers. Colon form only: the assignment form of these
+    // names is already handled by the keyword pass (they all contain key,
+    // token or api). Header names are a curated list, not a guess.
+    t = t.replace(/((?:X-)?(?:API[_-]?Key|Auth[_-]?Token|Access[_-]?Token|Functions-Key)\s*:\s*\\?["']?\s*)([^\s"'\\;,&]+)/gi, function(m, pre, val){
+        if(val === '[REDACTED]') return m;
+        count++; cats.push('api_key');
+        return pre + '[REDACTED]';
+    });
+    t = t.replace(/(Ocp-Apim-Subscription-Key\s*:\s*\\?["']?\s*)([^\s"'\\;,&]+)/gi, function(m, pre, val){
+        if(val === '[REDACTED]') return m;
+        count++; cats.push('api_key');
+        return pre + '[REDACTED]';
+    });
+
+    // Cookie / Set-Cookie headers: session cookies ARE credentials, and
+    // copied request headers in debugging XML carry them. The whole value is
+    // redacted; it stops at a quote, backslash (escaped quote or \r\n in a
+    // FileMaker string literal) or a real newline.
+    t = t.replace(/((?:Set-)?Cookie\s*:\s*)([^"'\\\r\n]+)/gi, function(m, pre, val){
+        if(/^\[REDACTED\]\s*$/.test(val)) return m;
+        count++; cats.push('token');
+        return pre + '[REDACTED]';
+    });
+
+    // cURL user options: -u / --user / --proxy-user user:password. The
+    // username is kept as context, the password is redacted.
+    t = t.replace(/((?:^|[\s"'])(?:-u|--user|--proxy-user)\s+\\?["']?)([^\s"'\\:;]+):([^\s"'\\;]+)/g, function(m, pre, user, pass){
+        if(pass === '[REDACTED]') return m;
+        count++; cats.push('password');
+        return pre + user + ':[REDACTED]';
+    });
+
+    return { text: t, count: count, cats: cats };
+}
+
+// Redact secrets that live inside URLs themselves. Two shapes:
+//   scheme://user:password@host   any scheme (https, ftp, sftp, jdbc:mysql,
+//                                 postgres, mongodb+srv...), username kept,
+//                                 password redacted
+//   ?api_key=value / &token=...   the query parameter NAME marks the value
+//                                 as a credential, so it is redacted even
+//                                 when the host is public and stays visible
+// This generalises the webhook-URL insight: a URL can itself carry auth.
+// Returns { text, count, cats }.
+function redactUrlSecrets(txt){
+    let count = 0;
+    const cats = [];
+    let t = txt;
+
+    // Userinfo passwords, any scheme.
+    t = t.replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\/\s:@"'\\]+):([^\/\s@"'\\]+)@/g, function(m, sch, user, pass){
+        if(pass === '[REDACTED]') return m;
+        count++; cats.push('password');
+        return sch + user + ':[REDACTED]@';
+    });
+
+    // Secret-bearing query parameters. The name list is deliberately broad
+    // (key= and code= will over-redact occasionally); for a scrubber that is
+    // the right failure direction, and every hit is listed in the findings.
+    t = t.replace(/([?&](?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|id[_-]?token|token|key|secret|client[_-]?secret|password|pwd|passwd|sig|signature|sas|code|phpsessid|jsessionid|session[_-]?id)=)([^&\s"'\\<>#]+)/gi, function(m, pre, val){
+        if(val === '[REDACTED]') return m;
+        count++; cats.push(categFromName(pre));
+        return pre + '[REDACTED]';
+    });
+
+    return { text: t, count: count, cats: cats };
+}
+
 // Redact credential literals inside one calculation string. Returns { text, count, cats }.
-function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure){
+function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure, doHeader, doUrlSecret){
     var count=0, cats=[];
 
     // Known key formats run across the WHOLE text, comments included. Near-zero
@@ -553,8 +662,27 @@ function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure){
             t=t.replace(reS,function(m,b,pre,val){ if(val==='[REDACTED]')return m; count++; cats.push(categFromName(pre)); return b+pre+"'[REDACTED]'"; });
         }
 
+        // Header and URL-secret passes run AFTER the keyword pass, so an
+        // Authorization = "Bearer x" assignment already redacted whole by
+        // the keyword pass is not counted twice, and BEFORE host redaction,
+        // so a userinfo password is gone before the host is evaluated.
+        if(doHeader){
+            const rh = redactHeaderCreds(t);
+            t = rh.text; count += rh.count;
+            rh.cats.forEach(function(c){ cats.push(c); });
+        }
+        if(doUrlSecret){
+            const ru = redactUrlSecrets(t);
+            t = ru.text; count += ru.count;
+            ru.cats.forEach(function(c){ cats.push(c); });
+        }
+
         if(doUrl){
-            t=t.replace(/(https?:\/\/)([a-zA-Z0-9._-]+)((?::\d+)?(?:\/[^\s"']*)?)/g,function(m,sch,host,rest){
+            // The optional userinfo group skips an already-redacted
+            // user:[REDACTED]@ prefix so the REAL host after the @ still
+            // gets the [HOST] treatment; without it the username was being
+            // matched as the host and the internal hostname leaked.
+            t=t.replace(/(https?:\/\/(?:[^\s"'\/@]*@)?)([a-zA-Z0-9._-]+)((?::\d+)?(?:\/[^\s"']*)?)/g,function(m,sch,host,rest){
                 if(host==='[HOST]'||!isInternalHost(host)) return m;
                 count++; cats.push('url'); return sch+'[HOST]'+(rest||'');
             });
@@ -661,7 +789,7 @@ function redactDocument(sourceDoc, cfg){
     function processCalcEl(el, kindLabel){
         if(done.has(el)) return;
         var txt=el.textContent||''; if(!txt) return;
-        var r=redactCalcText(txt, knownKeyRe, cfg.inline?kwParts:null, cfg.url, cfg.azure);
+        var r=redactCalcText(txt, knownKeyRe, cfg.inline?kwParts:null, cfg.url, cfg.azure, cfg.headercred, cfg.urlsecret);
         if(r.count>0){
             setCalcText(el, r.text, doc); done.add(el);
             r.cats.forEach(function(c){ tally1(c,1); });
@@ -882,17 +1010,34 @@ function redactDocument(sourceDoc, cfg){
         });
     }
 
-    // 5: connection-string attributes with an embedded password
+    // 5: connection-string attributes with an embedded credential. Covers
+    // password=/pwd=, Azure AccountKey= and SAS, generic AccessToken= and
+    // AuthenticationToken=, plus jdbc:mysql://user:password@host style URL
+    // passwords in DSN and url attributes. The key name is preserved so the
+    // redacted string still reads as a connection string.
     if(cfg.connstr){
-        var connRe=/(?:password|pwd)\s*=/i;
+        var connKeyRe=/(?:password|pwd|accountkey|sharedaccesssignature|accesstoken|authenticationtoken)\s*=/i;
+        var connUserinfoRe=/([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\/\s:@"'\\]+):([^\/\s@"'\\]+)@/;
         ['ExternalDataSource','DataSource','ODBCDataSource'].forEach(function(sel){
             root.querySelectorAll(sel).forEach(function(ds){
                 ['DSN','ConnectionString','connection','connectionString','url','Url'].forEach(function(an){
                     var val=ds.getAttribute(an);
-                    if(val&&connRe.test(val)){
-                        var rv=val.replace(/(?:password|pwd)\s*=\s*[^;,'"]+/gi,'password=[REDACTED]'); ds.setAttribute(an, rv);
+                    if(!val) return;
+                    var hit=false, rv=val;
+                    if(connKeyRe.test(rv)){
+                        rv=rv.replace(/(password|pwd|accountkey|sharedaccesssignature|accesstoken|authenticationtoken)(\s*=\s*)[^;,'"]+/gi,'$1$2[REDACTED]');
+                        hit=true;
+                    }
+                    if(connUserinfoRe.test(rv)){
+                        rv=rv.replace(new RegExp(connUserinfoRe.source,'g'),function(m,sch,user,pass){
+                            if(pass==='[REDACTED]') return m;
+                            hit=true; return sch+user+':[REDACTED]@';
+                        });
+                    }
+                    if(hit && rv!==val){
+                        ds.setAttribute(an, rv);
                         tally1('password',1);
-                        changes.push({severity:'medium',kind:'Connection string password',category:'password',location:ds.tagName+nm(ds),count:1,before:previewRedactions(rv),note:'Attribute "'+an+'" contained password='});
+                        changes.push({severity:'medium',kind:'Connection string credential',category:'password',location:ds.tagName+nm(ds),count:1,before:previewRedactions(rv),note:'Attribute "'+an+'" contained an embedded credential'});
                     }
                 });
             });
@@ -1102,7 +1247,8 @@ function buildConfig(){
         aws:$('pat-awskey').checked, github:$('pat-ghkey').checked,
         slack:$('pat-slackkey').checked, stripe:$('pat-stripekey').checked,
         sendgrid:$('pat-sgkey').checked,
-        pem:$('pat-pemkey').checked, webhook:$('pat-webhook').checked
+        pem:$('pat-pemkey').checked, webhook:$('pat-webhook').checked,
+        jwt:$('pat-jwtkey').checked
     };
     var active={
         apikey:$('pat-apikey').checked, token:$('pat-token').checked,
@@ -1117,7 +1263,8 @@ function buildConfig(){
         inline:$('pat-inline').checked, url:$('pat-urlhost').checked,
         textnode:$('pat-textnode').checked, connstr:$('pat-connstr').checked,
         plugin:$('pat-plugin').checked, azure:$('pat-connstr').checked,
-        pem:$('pat-pemkey').checked, curlcred:$('pat-curlcred').checked
+        pem:$('pat-pemkey').checked, curlcred:$('pat-curlcred').checked,
+        headercred:$('pat-headercred').checked, urlsecret:$('pat-urlsecret').checked
     };
 }
 
