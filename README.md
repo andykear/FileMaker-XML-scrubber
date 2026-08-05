@@ -9,6 +9,11 @@ Created by Andrew Kear of Clockwork Creative Technology and shared openly with t
 
 ---
 
+This repo title or near derivatives has been used to impersonate my project on github to deliver malware please check you are downloading from a legitimate source.
+My tools are open source under CC BY 4.0, which is why you'll also see them vendored inside other builders' AI solutions or used as a canonical reference for testing, that's expected and welcome.
+
+---
+
 ## What problem does this solve?
 
 When you paste FileMaker script XML or DDR exports into ChatGPT, Claude, Gemini or any other AI tool, you risk leaking API keys, passwords, OAuth tokens, private keys and internal hostnames that are embedded in calculations and configurations.
