@@ -134,7 +134,7 @@ The file is parsed, scanned and redacted entirely in the browser using the DOM. 
 
 ## Usage
 
-1. Open `filemaker-xml-scrubber.html` in any modern browser
+1. Open `clockwork-scrubber.html` in any modern browser
 2. Drop a file or click to choose one
 3. Review the findings
 4. Download the redacted copy or copy it to the clipboard
