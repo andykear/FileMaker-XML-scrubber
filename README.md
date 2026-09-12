@@ -70,6 +70,7 @@ These have near zero false positive rates, so they are matched everywhere, inclu
 - **Slack** tokens (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-`, `xoxs-`)
 - **Stripe** keys (`sk_live_`, `rk_live_`, `sk_test_`, `rk_test_`)
 - **SendGrid** API keys (`SG.xxxx.xxxx`)
+- **OttoFMS** Data API keys (`dk_`) and Admin API keys (`ak_`). These are the FileMaker ecosystem's own long-lived credentials, passed as `Authorization: Bearer` headers or `?apiKey=` parameters, and no generic scrubber knows their shape
 - **JWT / JWS tokens**: the three-segment `eyJ...` base64url shape, wherever it appears
 - **PEM and SSH private keys** (`-----BEGIN ... PRIVATE KEY-----`), including keys split across concatenated literals
 - **Incoming webhook URLs** for Slack, Discord and Microsoft Teams, where the URL itself carries the auth token
@@ -82,6 +83,12 @@ These depend on where a value sits or what it is named, so they are matched only
 - **Set Variable** steps (step id 141) whose name matches a credential keyword: a single literal is replaced whole, an expression has every literal inside it redacted
 - **Inline keyword assignments** inside calculations, such as `apikey = "value"`, including Let() locals with no `$` prefix
 - **Credential keywords** covered: api key, token, bearer, authorization, password, secret, SMTP pass or key, private key, auth key, SSH key, SFTP pass, passphrase, credential, OAuth
+- **JSON body credentials**: `"password":"value"` and the escaped form `\"password\":\"value\"` inside hardcoded request bodies, using the same keyword list as assignments. The colon form is how credentials ride in Insert from URL `--data` payloads, where no equals sign ever appears
+- **FileMaker's own credential-carrying steps**: Re-Login with specified credentials, Add Account, Reset Account Password, Change Password, Send Mail SMTP authentication and ODBC steps all wrap the password in a credential-named element like `<Password>`. The literal inside is redacted whole; account names are left as context. Variable and field references inside these elements are left visible, since the value lives elsewhere
+- **Set Field and Insert Text into credential-named fields**: `Set Field [ Users::Password ; "temp123" ]` carries no keyword in the value, so the target field name is used as the identification, exactly like the Set Variable pass. Set Field By Name is covered when its calculated target names a credential field
+- **JSONSetElement credential values**: `JSONSetElement ( $json ; "apiKey" ; "..." ; JSONString )` passes the value positionally, identified by the key name. Both the flat form and the bracketed `[key;value;type]` group form are handled, with the same literal, variable trace and field reference triage as the MBS CURL calls below
+- **Encryption and HMAC key arguments**: the key argument to CryptEncrypt, CryptDecrypt, their Base64 twins and CryptAuthCode is the secret itself, at a fixed position. Same three-way handling: literals redacted in place, variables traced to their source Set Variable in the same script, field references flagged
+- **Base64 user:pass literals**: a hardcoded `"Basic dXNlcjpwYXNz..."` is caught by the header pass when the Authorization prefix is present, but the bare token assigned to an innocently named variable has no keyword and no shape. Base64-looking runs inside literals are decoded, and anything that comes back as printable `user:password` is redacted. Strings that decode to JSON or XML (a lone JWT segment, an encoded payload) are excluded
 - **HTTP header credentials**, wherever header text appears: `Authorization: Bearer/Basic/Token/Digest/OAuth` values, `X-API-Key` and similar key-carrying headers, and `Cookie`/`Set-Cookie` session values. This covers Insert from URL cURL options, including the escaped-quote form `-H \"Authorization: Bearer ...\"`, where the header name identifies the value as a credential regardless of its shape
 - **cURL user options**: the password half of `-u`, `--user` and `--proxy-user user:password`, with the username kept as context
 - **URL passwords**: `scheme://user:password@host` for any scheme (https, ftp, sftp, jdbc, postgres, mongodb and so on). The username stays, the password goes, and an internal host after the `@` still becomes `[HOST]`
@@ -95,8 +102,20 @@ These depend on where a value sits or what it is named, so they are matched only
   - a field reference (`Table::Password`) has nothing to redact, since the value lives in your data rather than this file, so it's flagged for manual review instead
   
   The trace is scoped to the current script only. A variable set by a calling script, or a global `$$variable` set elsewhere, will show up as unresolved rather than being silently missed.
-- **Internal hostnames and private IPs**, replaced with `[HOST]`. Public URLs are left alone
+- **Internal hostnames and private IPs**, replaced with `[HOST]`. Public URLs are left alone. Coverage now extends beyond http(s) to `fmnet:/`, `fmp://`, `sftp://`, `ftp://`, `smb://`, `ldap://`, `filewin://`, `filemac://` and UNC paths (`\\SERVER\share`), all of which were carrying internal hostnames straight through before
+- **Home directory usernames**: `/Users/jsmith/`, `/home/jsmith/` and `C:\Users\jsmith\` identify employees by machine account name; the username becomes `[USER]` and the rest of the path is kept
 - **Attributes** whose name matches a credential keyword
+
+### Flagged but never modified
+
+- **Credentials written in comment prose**: the keyword passes deliberately skip comments so documentation is not mangled, which left "temp password is hunter2" in a script or field comment invisible. Comments where a credential keyword sits next to a value now raise a finding for manual review. Nothing in the comment is changed
+
+### Personal data (off by default)
+
+Two optional patterns for anyone who needs the output GDPR-clean as well as credential-clean. Both are off by default because they redact data, not secrets, and you may want that data intact.
+
+- **Email addresses**, replaced with `[EMAIL]`, everywhere in the file including value lists and attributes
+- **Card numbers**, replaced with `[CARD]`. Digit runs of 13 to 19 are only treated as cards when they pass the Luhn check, which keeps FileMaker's own long internal ids out of the findings
 
 ---
 
@@ -105,9 +124,9 @@ These depend on where a value sits or what it is named, so they are matched only
 This is a heuristic scrubber, not a guarantee. It does not catch:
 
 - Account names and privilege set names
-- Internal file paths and file names
+- File paths and file names, beyond internal hostnames in path schemes and usernames in home directories
 - ESS and ODBC data source names beyond the password field
-- Email addresses and SMTP server names
+- Email addresses (unless the optional personal data pattern is on) and SMTP server names that look public
 - Value list contents, schema names, field names or any sensitive literal that does not match a credential shape
 - Credentials passed via a variable set in a *calling* script, or a global `$$variable` set elsewhere in the file. The SFTP/CURL trace only follows the current script's own steps; anything outside that is flagged as unresolved, not redacted
 
@@ -171,4 +190,4 @@ Provided as is, with no warranty. The tool may miss values or redact more than y
 
 ---
 
-v1.3 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)
+v1.4 · [Clockwork Creative Technology](https://www.clockworkct.co.uk)

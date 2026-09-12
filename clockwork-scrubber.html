@@ -232,6 +232,11 @@
             <span class="pattern-desc">SendGrid API keys</span>
           </div>
           <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-ottokey" checked>
+            <span class="pattern-name">dk_ / ak_</span>
+            <span class="pattern-desc">OttoFMS Data / Admin API keys</span>
+          </div>
+          <div class="pattern-row">
             <input type="checkbox" class="pattern-toggle" id="pat-jwtkey" checked>
             <span class="pattern-name">eyJ...&#8202;.&#8202;eyJ...</span>
             <span class="pattern-desc">JWT / JWS tokens</span>
@@ -329,6 +334,45 @@
             <span class="pattern-name">&lt;Text&gt; nodes</span>
             <span class="pattern-desc">Raw string parameters in steps</span>
           </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-jsoncred" checked>
+            <span class="pattern-name">"keyword":"value"</span>
+            <span class="pattern-desc">JSON body credentials</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-nativecred" checked>
+            <span class="pattern-name">JSONSetElement / Crypt*</span>
+            <span class="pattern-desc">Positional key arguments, traced to source</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-credtarget" checked>
+            <span class="pattern-name">&lt;Password&gt; / Set Field</span>
+            <span class="pattern-desc">Re-Login, Add Account, SMTP, credential fields</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-b64" checked>
+            <span class="pattern-name">base64 user:pass</span>
+            <span class="pattern-desc">Decoded Basic-auth literals</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-commentaudit" checked>
+            <span class="pattern-name">comment audit</span>
+            <span class="pattern-desc">Flags credentials in comments, changes nothing</span>
+          </div>
+        </div>
+
+        <div class="pattern-group">
+          <div class="pattern-group-label">Personal data (off by default)</div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-piiemail">
+            <span class="pattern-name">email addresses</span>
+            <span class="pattern-desc">→ [EMAIL], everywhere in the file</span>
+          </div>
+          <div class="pattern-row">
+            <input type="checkbox" class="pattern-toggle" id="pat-piicard">
+            <span class="pattern-name">card numbers</span>
+            <span class="pattern-desc">→ [CARD], Luhn checked</span>
+          </div>
         </div>
 
         <div class="pattern-group">
@@ -376,7 +420,7 @@
     Download redacted XML
   </button>
 </footer>
-<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.3 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
+<div class="disclaimer"><div>Heuristic scrubber. Catches credential shaped literals and credential named variables. Does not catch account names, file paths or arbitrary sensitive data. Runs in your browser with no upload. Review before sharing.</div><div style="margin-top:4px">v1.4 &middot; Clockwork Creative Technology &middot; Open source &middot; CC BY 4.0</div></div>
 
 <script>
 // ============================================================
@@ -408,6 +452,7 @@ function buildKnownKeyRe(o){
     if(o.slack)  p.push('xox[baprs]-[A-Za-z0-9-]{10,}');
     if(o.stripe) p.push('[sr]k_(?:live|test)_[A-Za-z0-9]{20,}');     // Stripe live + test secret/restricted keys
     if(o.sendgrid) p.push('SG\\.[\\w-]{16,}\\.[\\w-]{16,}');          // SendGrid API key (SG.xxxx.xxxx)
+    if(o.otto)   p.push('dk_[A-Za-z0-9]{8,}','ak_[A-Za-z0-9]{8,}'); // OttoFMS Data API (dk_) and Admin API (ak_) keys
     if(o.pem)    p.push('-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----');   // PEM private key block (RSA/EC/OPENSSH/PKCS8)
     if(o.jwt)    p.push('eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}'); // JWT/JWS: three base64url segments, header always starts eyJ ({" encoded)
     if(o.webhook){                                                  // incoming-webhook URLs carry their own auth token
@@ -448,7 +493,7 @@ function excerpt(b){ var s=(b||'').trim().replace(/\s+/g,' '); return s.length>2
 // which is often a documentation comment.
 function previewRedactions(text, maxWins){
     maxWins=maxWins||6;
-    var re=/\[REDACTED\]|\[HOST\]/g, marks=[], m;
+    var re=/\[REDACTED\]|\[HOST\]|\[USER\]|\[EMAIL\]|\[CARD\]/g, marks=[], m;
     while((m=re.exec(text))!==null) marks.push([m.index, m.index+m[0].length]);
     if(marks.length===0) return excerpt(text);
     var wins=[];
@@ -635,8 +680,33 @@ function redactUrlSecrets(txt){
     return { text: t, count: count, cats: cats };
 }
 
+// Decode a base64-looking token and decide whether it hides a user:password
+// pair. Hardcoded Basic-auth values often ride as bare base64 literals
+// assigned to innocently named variables, where no keyword or key shape can
+// see them. The decode is the only reliable detector: printable ASCII with a
+// colon splitting two non-empty halves is the user:pass shape. Strings that
+// decode to JSON or XML (a lone JWT segment, an encoded payload) start with
+// { or < and are excluded, since those are data, not credentials.
+function isBase64UserPass(token){
+    // atob throws on non-base64 input, so a failed decode means "not a credential"
+    try{
+        if(token.length % 4 !== 0) return false;
+        var decoded = atob(token);
+        if(decoded.length < 6 || decoded.length > 194) return false;
+        // printable ASCII only; binary data decodes are not credentials
+        if(!/^[\x20-\x7e]+$/.test(decoded)) return false;
+        // JSON/XML payloads (JWT segments, encoded bodies) are excluded
+        if(decoded[0] === '{' || decoded[0] === '<') return false;
+        // the user:pass shape: non-empty user, a colon, non-empty password
+        return /^[^:\s]{1,64}:[^\s].{0,127}$/.test(decoded);
+    }catch(e){ return false; }
+}
+
 // Redact credential literals inside one calculation string. Returns { text, count, cats }.
-function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure, doHeader, doUrlSecret){
+// opts carries the v1.4 additions: jsoncred (JSON "key":"value" colon form),
+// b64 (base64 user:pass decode heuristic), userpath ([USER] in home paths).
+function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure, doHeader, doUrlSecret, opts){
+    opts = opts || {};
     var count=0, cats=[];
 
     // Known key formats run across the WHOLE text, comments included. Near-zero
@@ -662,6 +732,45 @@ function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure, doHeader, doUr
             t=t.replace(reS,function(m,b,pre,val){ if(val==='[REDACTED]')return m; count++; cats.push(categFromName(pre)); return b+pre+"'[REDACTED]'"; });
         }
 
+        // JSON colon form: the keyword=value pass above requires an equals
+        // sign, so a credential inside a hardcoded JSON request body
+        // ("password":"hunter2") sailed straight through. Two shapes exist in
+        // calc text: the escaped form (\"password\":\"x\") inside a FileMaker
+        // string literal, which is how Insert from URL --data payloads are
+        // written, and the plain form ("password":"x") in raw JSON that sits
+        // outside string literals (custom function bodies, pasted samples).
+        // The escaped form is matched first, because its \" sequences would
+        // otherwise confuse the plain-form match.
+        if(opts.jsoncred && kwParts && kwParts.length){
+            var altJ=kwParts.join('|');
+            // Escaped form: \"key\" : \"value\" -- the value runs until the
+            // next \" sequence. A backslash NOT followed by a quote is legal
+            // inside the value (e.g. \\n), hence the [^"\\]|\\[^"] body.
+            var reJE=new RegExp('(\\\\"[\\w.-]*(?:'+altJ+')[\\w.-]*\\\\"[ \\t]*:[ \\t]*\\\\")((?:[^"\\\\]|\\\\[^"])*)(\\\\")','gi');
+            t=t.replace(reJE,function(m,pre,val,post){ if(val==='[REDACTED]')return m; count++; cats.push(categFromName(pre)); return pre+'[REDACTED]'+post; });
+            // Plain form: "key" : "value" with real quotes.
+            var reJP=new RegExp('("[\\w.-]*(?:'+altJ+')[\\w.-]*"[ \\t]*:[ \\t]*")((?:[^"\\\\]|\\\\.)*)(")','gi');
+            t=t.replace(reJP,function(m,pre,val,post){ if(val==='[REDACTED]')return m; count++; cats.push(categFromName(pre)); return pre+'[REDACTED]'+post; });
+        }
+
+        // Base64 user:pass literals: a hardcoded "Basic dXNlcjpwYXNz" is
+        // caught by the header pass when the Authorization: prefix is
+        // present, but the bare token assigned to $auth has no keyword and
+        // no key shape. Each base64-looking run inside a string literal is
+        // decoded, and anything that comes back as printable user:pass is
+        // redacted in place, keeping surrounding text (like the word Basic)
+        // as context.
+        if(opts.b64){
+            t=t.replace(/"((?:[^"\\]|\\.)*)"/g,function(lit,inner){
+                if(inner.indexOf('[REDACTED]')!==-1) return lit;
+                var replaced=inner.replace(/[A-Za-z0-9+\/]{12,}={0,2}/g,function(tok){
+                    if(!isBase64UserPass(tok)) return tok;
+                    count++; cats.push('password'); return '[REDACTED]';
+                });
+                return replaced===inner ? lit : '"'+replaced+'"';
+            });
+        }
+
         // Header and URL-secret passes run AFTER the keyword pass, so an
         // Authorization = "Bearer x" assignment already redacted whole by
         // the keyword pass is not counted twice, and BEFORE host redaction,
@@ -682,12 +791,35 @@ function redactCalcText(txt, knownKeyRe, kwParts, doUrl, doAzure, doHeader, doUr
             // user:[REDACTED]@ prefix so the REAL host after the @ still
             // gets the [HOST] treatment; without it the username was being
             // matched as the host and the internal hostname leaked.
-            t=t.replace(/(https?:\/\/(?:[^\s"'\/@]*@)?)([a-zA-Z0-9._-]+)((?::\d+)?(?:\/[^\s"']*)?)/g,function(m,sch,host,rest){
+            // Scheme list widened in v1.4: the old https?-only match let
+            // fmnet:/fms.corp.local/CRM, fmp://host/file, sftp:// and
+            // filewin:// paths carry internal hostnames straight through.
+            // fmnet uses a single slash, hence :\/{1,3}.
+            t=t.replace(/((?:https?|ftps?|sftp|scp|smb|ldaps?|wss?|fmp\d*|fmnet|filewin|filemac|file):\/{1,3}(?:[^\s"'\/@]*@)?)([a-zA-Z0-9._-]+)((?::\d+)?(?:\/[^\s"']*)?)/gi,function(m,sch,host,rest){
                 if(host==='[HOST]'||!isInternalHost(host)) return m;
                 count++; cats.push('url'); return sch+'[HOST]'+(rest||'');
             });
+            // UNC paths: \\SERVER\share. In calc text the backslashes are
+            // doubled by FileMaker string escaping, so 2+ backslashes
+            // followed by a host followed by a backslash is the shape.
+            t=t.replace(/(\\{2,})([a-zA-Z0-9._-]+)(?=\\)/g,function(m,slashes,host){
+                if(host==='[HOST]'||!isInternalHost(host)) return m;
+                count++; cats.push('url'); return slashes+'[HOST]';
+            });
             t=t.replace(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g,function(m,ip){
                 if(!isPrivateIp(ip)) return m; count++; cats.push('url'); return '[HOST]';
+            });
+            // Home-directory paths identify employees by their machine
+            // account name: /Users/jsmith/, /home/jsmith/, C:\Users\jsmith\.
+            // The username becomes [USER]; the rest of the path is kept,
+            // since the structure is usually needed to understand the calc.
+            t=t.replace(/(\/(?:Users|home)\/)([a-zA-Z0-9._-]+)/g,function(m,pre,user){
+                if(user==='[USER]'||user==='Shared') return m;
+                count++; cats.push('url'); return pre+'[USER]';
+            });
+            t=t.replace(/([a-zA-Z]:\\{1,2}Users\\{1,2})([a-zA-Z0-9._-]+)/g,function(m,pre,user){
+                if(user==='[USER]'||/^(Public|Default)$/i.test(user)) return m;
+                count++; cats.push('url'); return pre+'[USER]';
             });
         }
         if(doAzure){
@@ -778,7 +910,7 @@ function redactDocument(sourceDoc, cfg){
     var doc=sourceDoc.cloneNode(true);
     var root=doc.documentElement;
     var changes=[];
-    var tally={api_key:0,token:0,password:0,secret:0,smtp:0,oauth:0,credential:0,license:0,url:0,total:0};
+    var tally={api_key:0,token:0,password:0,secret:0,smtp:0,oauth:0,credential:0,license:0,url:0,pii:0,total:0};
     function tally1(c,n){ tally[c]=(tally[c]||0)+n; tally.total+=n; }
 
     var knownKeyRe=cfg.knownKeyRe;
@@ -789,7 +921,8 @@ function redactDocument(sourceDoc, cfg){
     function processCalcEl(el, kindLabel){
         if(done.has(el)) return;
         var txt=el.textContent||''; if(!txt) return;
-        var r=redactCalcText(txt, knownKeyRe, cfg.inline?kwParts:null, cfg.url, cfg.azure, cfg.headercred, cfg.urlsecret);
+        var r=redactCalcText(txt, knownKeyRe, cfg.inline?kwParts:null, cfg.url, cfg.azure, cfg.headercred, cfg.urlsecret,
+            { jsoncred:cfg.jsoncred, b64:cfg.b64 });
         if(r.count>0){
             setCalcText(el, r.text, doc); done.add(el);
             r.cats.forEach(function(c){ tally1(c,1); });
@@ -824,6 +957,92 @@ function redactDocument(sourceDoc, cfg){
                 var r=redactAllLiterals(txt);
                 if(r.count>0){ setCalcText(v,r.text,doc); done.add(v); tally1(cat,r.count);
                     changes.push({severity:'high',kind:'Set Variable (credential name)',category:cat,location:locationOf(v),count:r.count,before:previewRedactions(r.text),note:'Literals in a credential-named variable redacted'});
+                }
+            }
+        });
+    }
+
+    // 1.2: credential-named ELEMENTS. FileMaker's own steps embed passwords
+    // structurally: Re-Login with specified credentials, Add Account, Reset
+    // Account Password, Change Password, Send Mail SMTP authentication and
+    // ODBC steps all wrap the password in an element NAMED for what it is,
+    // like <Password><Calculation>"hunter2"</Calculation></Password>. The
+    // literal inside has no keyword and usually no shape, so every earlier
+    // pass missed it; the element name is the identification, exactly as the
+    // attribute-name pass already works. Account-name elements are left
+    // alone by design (the keyword list has never included "account").
+    if(cfg.credtarget && credNameRe){
+        root.querySelectorAll('*').forEach(function(el){
+            if(!credNameRe.test(el.tagName)) return;
+            var cat=categFromName(el.tagName);
+            var calc=el.querySelector(':scope > Calculation') || (el.tagName!=='Calculation' ? el.querySelector('Calculation') : null);
+            if(calc){
+                if(done.has(calc)) return;
+                var txt=calc.textContent||''; if(!txt.trim()) return;
+                if(isBareString(txt)){
+                    setCalcText(calc,'"[REDACTED]"',doc); done.add(calc); tally1(cat,1);
+                    changes.push({severity:'high',kind:'Credential-named element',category:cat,location:locationOf(calc),count:1,before:'"[REDACTED]"',note:'<'+el.tagName+'> element (Re-Login / Add Account / SMTP / ODBC class) set to a literal'});
+                } else {
+                    var r=redactAllLiterals(txt);
+                    if(r.count>0){
+                        setCalcText(calc,r.text,doc); done.add(calc); tally1(cat,r.count);
+                        changes.push({severity:'high',kind:'Credential-named element',category:cat,location:locationOf(calc),count:r.count,before:previewRedactions(r.text),note:'Literals inside a <'+el.tagName+'> element redacted'});
+                    }
+                }
+            } else if(el.children.length===0){
+                // A text-only credential element (no Calculation wrapper).
+                // Variable and field references are left visible, since the
+                // value lives elsewhere and the reference is the useful context.
+                var tv=(el.textContent||'').trim();
+                if(!tv || tv==='[REDACTED]' || tv[0]==='$' || tv.indexOf('::')!==-1) return;
+                el.textContent='[REDACTED]'; tally1(cat,1);
+                changes.push({severity:'high',kind:'Credential-named element',category:cat,location:locationOf(el),count:1,before:'[REDACTED]',note:'<'+el.tagName+'> element contained a bare value'});
+            }
+        });
+    }
+
+    // 1.3: Set Field / Insert Text whose TARGET FIELD is credential-named.
+    // Set Field [ Users::Password ; "temp123" ] carries no keyword in the
+    // value calc; the target field name is the identification, mirroring the
+    // Set Variable pass above. Matched by step NAME rather than id so the
+    // pass survives any renumbering and covers Set Field By Name too.
+    if(cfg.credtarget && credNameRe){
+        root.querySelectorAll('Step').forEach(function(step){
+            var stepName=step.getAttribute('name')||'';
+            var isSetField=/^Set Field$/i.test(stepName), isSetFieldByName=/^Set Field By Name$/i.test(stepName), isInsertText=/^Insert Text$/i.test(stepName);
+            if(!isSetField && !isSetFieldByName && !isInsertText) return;
+            // For Set Field / Insert Text the target is a <Field name="...">
+            // child; for Set Field By Name the target is itself a calc, so
+            // any non-Value calculation naming a credential field counts.
+            var targetHit=false;
+            var fld=step.querySelector(':scope > Field');
+            if(fld && credNameRe.test(fld.getAttribute('name')||'')) targetHit=true;
+            if(isSetFieldByName && !targetHit){
+                step.querySelectorAll('Calculation').forEach(function(c){
+                    if(c.parentNode && c.parentNode.tagName==='Value') return;
+                    if(credNameRe.test(c.textContent||'')) targetHit=true;
+                });
+            }
+            if(!targetHit) return;
+            var fldName=fld?(fld.getAttribute('name')||''):'(calculated target)';
+            var cat=categFromName(fldName)!=='credential'?categFromName(fldName):'password';
+            if(isInsertText){
+                var textEl=step.querySelector(':scope > Text');
+                if(textEl && (textEl.textContent||'').trim() && textEl.textContent!=='[REDACTED]'){
+                    textEl.textContent='[REDACTED]'; tally1(cat,1);
+                    changes.push({severity:'high',kind:'Insert Text into credential field',category:cat,location:locationOf(textEl),count:1,before:'[REDACTED]',note:'Text inserted into field "'+fldName+'"'});
+                }
+                return;
+            }
+            var v=step.querySelector('Value > Calculation'); if(!v||done.has(v))return;
+            var txt=v.textContent||''; if(!txt.trim())return;
+            if(isBareString(txt)){
+                setCalcText(v,'"[REDACTED]"',doc); done.add(v); tally1(cat,1);
+                changes.push({severity:'high',kind:'Set Field (credential field)',category:cat,location:locationOf(v),count:1,before:'"[REDACTED]"',note:'Literal written to field "'+fldName+'"'});
+            } else {
+                var r=redactAllLiterals(txt);
+                if(r.count>0){ setCalcText(v,r.text,doc); done.add(v); tally1(cat,r.count);
+                    changes.push({severity:'high',kind:'Set Field (credential field)',category:cat,location:locationOf(v),count:r.count,before:previewRedactions(r.text),note:'Literals written to field "'+fldName+'" redacted'});
                 }
             }
         });
@@ -887,13 +1106,10 @@ function redactDocument(sourceDoc, cfg){
     // Scope: the trace only walks the current script's own steps. A variable
     // set by a calling script, or a global $$variable set elsewhere, will not
     // be found -- flagged as unresolved rather than silently missed.
-    if(cfg.curlcred){
-        var CRED_CALLS=[
-            { match:/CURL\.SetOptionPassword/i,      kind:'SFTP/CURL password',      severity:'high'   },
-            { match:/CURL\.SetOptionXOAuth2Bearer/i, kind:'OAuth bearer token',      severity:'high'   },
-            { match:/CURL\.SetOptionUserName/i,      kind:'SFTP/CURL username',      severity:'medium' }
-        ];
-        var findEnclosingScript=function(el){
+    // Shared by the MBS CURL pass (1.6) and the native-function pass (1.7):
+    // walking up to the owning script/step, and tracing a variable argument
+    // back to the Set Variable that assigned it within the same script.
+    var findEnclosingScript=function(el){
             var n=el; while(n){ if(n.nodeType===1 && n.tagName==='Script') return n; n=n.parentNode; } 
             // A bare clipboard paste (a script copied straight out of the Script
             // Workspace, or Andy Kear's own script-XML skill output) has no
@@ -922,6 +1138,13 @@ function redactDocument(sourceDoc, cfg){
             }
             return null;
         };
+
+    if(cfg.curlcred){
+        var CRED_CALLS=[
+            { match:/CURL\.SetOptionPassword/i,      kind:'SFTP/CURL password',      severity:'high'   },
+            { match:/CURL\.SetOptionXOAuth2Bearer/i, kind:'OAuth bearer token',      severity:'high'   },
+            { match:/CURL\.SetOptionUserName/i,      kind:'SFTP/CURL username',      severity:'medium' }
+        ];
         var processCurlCreds=function(el){
             var txt=el.textContent||'';
             if(!txt || !/CURL\.SetOption(Password|UserName|XOAuth2Bearer)/i.test(txt)) return;
@@ -997,6 +1220,158 @@ function redactDocument(sourceDoc, cfg){
         Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ processCurlCreds(el); });
     }
 
+    // 1.7: native functions that take a credential as a POSITIONAL argument.
+    // Same failure class as the MBS CURL calls above: nothing about the
+    // value identifies it, the consumer does. Two families are covered:
+    //   JSONSetElement ( json ; "apiKey" ; "zK9m..." ; JSONString )
+    //     -> the key name identifies the value, exactly like keyword="value"
+    //     but with FileMaker's semicolon syntax instead of an equals sign.
+    //     Both the flat form and the bracketed [key;value;type] group form
+    //     are handled.
+    //   CryptEncrypt / CryptDecrypt / CryptAuthCode and their Base64 twins
+    //     -> the key argument IS the secret, at a fixed position.
+    // Literal arguments are redacted in place; variable arguments are traced
+    // back through the script's own steps like the CURL pass; field
+    // references are flagged for manual review.
+    if(cfg.nativecred){
+        // keyIdx is the zero-based argument position of the secret; -1 means
+        // JSONSetElement's key/value pair handling applies instead.
+        var NATIVE_CRED_FNS=[
+            { name:'JSONSetElement',    keyIdx:-1, kind:'JSON credential value',  severity:'high' },
+            { name:'CryptEncryptBase64',keyIdx:1,  kind:'Encryption key argument',severity:'high' },
+            { name:'CryptDecryptBase64',keyIdx:1,  kind:'Encryption key argument',severity:'high' },
+            { name:'CryptEncrypt',      keyIdx:1,  kind:'Encryption key argument',severity:'high' },
+            { name:'CryptDecrypt',      keyIdx:1,  kind:'Encryption key argument',severity:'high' },
+            { name:'CryptAuthCode',     keyIdx:2,  kind:'HMAC key argument',      severity:'high' }
+        ];
+        var fnNameRe=new RegExp('\\b('+NATIVE_CRED_FNS.map(function(f){return f.name;}).join('|')+')\\s*\\(','gi');
+
+        var processNativeCreds=function(el){
+            var txt=el.textContent||'';
+            if(!txt || !fnNameRe.test(txt)) return;
+            fnNameRe.lastIndex=0;
+            var stepEl=findStepAncestor(el);
+            var scriptEl=stepEl?findEnclosingScript(stepEl):null;
+
+            // Redact one credential-bearing argument expression, whichever
+            // of the three shapes it takes. Returns the (possibly mutated)
+            // calc text so the caller can keep scanning the updated string.
+            var handleArg=function(valueArg, fnDef, fnLabel, callStart, callEnd, currentTxt){
+                if(isBareString(valueArg)){
+                    var q2=valueArg[0];
+                    var idx=currentTxt.indexOf(valueArg, callStart);
+                    if(idx===-1 || idx>callEnd) return currentTxt;
+                    var newTxt=currentTxt.slice(0,idx)+q2+'[REDACTED]'+q2+currentTxt.slice(idx+valueArg.length);
+                    setCalcText(el,newTxt,doc); tally1('password',1);
+                    changes.push({ severity:fnDef.severity, kind:fnDef.kind, category:'password',
+                        location:locationOf(el), count:1, before:previewRedactions(newTxt),
+                        note:'Literal argument to '+fnLabel+' \u2014 verify before sharing' });
+                    return newTxt;
+                }
+                if(/^\${1,2}[A-Za-z_][A-Za-z0-9_]*$/.test(valueArg)){
+                    var srcCalc=scriptEl?traceVariableSource(valueArg, scriptEl, stepEl):null;
+                    if(srcCalc && !done.has(srcCalc)){
+                        var srcTxt=srcCalc.textContent||'';
+                        if(isBareString(srcTxt)){
+                            setCalcText(srcCalc,'"[REDACTED]"',doc); done.add(srcCalc); tally1('password',1);
+                            changes.push({ severity:fnDef.severity, kind:fnDef.kind+' (traced to source)', category:'password',
+                                location:locationOf(srcCalc), count:1, before:'"[REDACTED]"',
+                                note:'Variable '+valueArg+' is passed to '+fnLabel+' \u2014 redacted at its source assignment' });
+                        } else {
+                            var r=redactAllLiterals(srcTxt);
+                            if(r.count>0){
+                                setCalcText(srcCalc,r.text,doc); done.add(srcCalc); tally1('password',r.count);
+                                changes.push({ severity:fnDef.severity, kind:fnDef.kind+' (traced to source)', category:'password',
+                                    location:locationOf(srcCalc), count:r.count, before:previewRedactions(r.text),
+                                    note:'Variable '+valueArg+' is passed to '+fnLabel+' \u2014 literals in its source assignment redacted' });
+                            }
+                        }
+                    } else if(!srcCalc){
+                        changes.push({ severity:fnDef.severity, kind:fnDef.kind+' (unresolved)', category:'password',
+                            location:locationOf(el), count:0, before:previewRedactions(currentTxt),
+                            note:'Variable '+valueArg+' is passed to '+fnLabel+' but its source could not be found \u2014 check a calling script, a global, or a field, and verify by hand' });
+                    }
+                    return currentTxt;
+                }
+                if(/::/.test(valueArg)){
+                    changes.push({ severity:'medium', kind:fnDef.kind+' (field reference)', category:'password',
+                        location:locationOf(el), count:0, before:previewRedactions(currentTxt),
+                        note:'This call reads its value from field '+valueArg+' \u2014 nothing to redact here, but reviewers should know where it comes from' });
+                }
+                return currentTxt;
+            };
+
+            var m;
+            while((m=fnNameRe.exec(txt))!==null){
+                var fnDef=null;
+                for(var k=0;k<NATIVE_CRED_FNS.length;k++){ if(NATIVE_CRED_FNS[k].name.toLowerCase()===m[1].toLowerCase()){ fnDef=NATIVE_CRED_FNS[k]; break; } }
+                if(!fnDef) continue;
+                // Walk to the matching close paren, string-aware, same as the MBS pass.
+                var i=m.index+m[0].length-1;
+                var depth=0, j=i, inStr=false, q='', esc=false;
+                for(; j<txt.length; j++){
+                    var c=txt[j];
+                    if(inStr){ if(esc) esc=false; else if(c==='\\') esc=true; else if(c===q) inStr=false; continue; }
+                    if(c==='"'||c==="'"){ inStr=true; q=c; continue; }
+                    if(c==='(') depth++;
+                    else if(c===')'){ depth--; if(depth===0){ j++; break; } }
+                }
+                var span=txt.slice(i+1,j-1);
+                var args=splitTopLevelArgs(span);
+                var before=txt;
+
+                if(fnDef.keyIdx>=0){
+                    // Crypt family: fixed key position.
+                    if(args.length>fnDef.keyIdx) txt=handleArg(args[fnDef.keyIdx], fnDef, fnDef.name, i, j, txt);
+                } else {
+                    // JSONSetElement: gather key/value pairs from the flat
+                    // form or from each bracketed [key;value;type] group,
+                    // then treat a value like a secret when its key name
+                    // matches the credential keyword list.
+                    var pairs=[];
+                    if(args.length>=2 && /^\[/.test(args[1])){
+                        // splitTopLevelArgs tracks parens and strings but not
+                        // square brackets, so each [key;value;type] group
+                        // arrives shredded across several args. Re-join from
+                        // the arg that opens a bracket to the arg that closes
+                        // it, then split the inside.
+                        var g=1;
+                        while(g<args.length){
+                            if(!/^\[/.test(args[g])){ g++; continue; }
+                            var grp=args[g]; var g2=g;
+                            while(!/\]$/.test(grp) && g2+1<args.length){ g2++; grp+=';'+args[g2]; }
+                            if(/^\[[\s\S]*\]$/.test(grp)){
+                                var triple=splitTopLevelArgs(grp.slice(1,-1));
+                                if(triple.length>=2) pairs.push([triple[0],triple[1]]);
+                            }
+                            g=g2+1;
+                        }
+                    } else if(args.length>=3){
+                        pairs.push([args[1],args[2]]);
+                    }
+                    // The call's close-paren position shifts as literals are
+                    // replaced, so the end bound is re-based after each
+                    // redaction; otherwise a later pair in the same call
+                    // could be skipped by a stale bound.
+                    var curEnd=j;
+                    for(var p2=0;p2<pairs.length;p2++){
+                        var keyExpr=pairs[p2][0], valExpr=pairs[p2][1];
+                        if(!credNameRe || !isBareString(keyExpr)) continue;
+                        if(!credNameRe.test(keyExpr.slice(1,-1))) continue;
+                        var prevLen=txt.length;
+                        txt=handleArg(valExpr, fnDef, 'JSONSetElement key '+keyExpr, i, curEnd, txt);
+                        curEnd+=(txt.length-prevLen);
+                    }
+                }
+                // If the text was mutated the call span may have shifted;
+                // continue scanning from the original call's opening paren.
+                if(txt!==before) fnNameRe.lastIndex=i;
+            }
+        };
+        Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ if(!done.has(el)) processNativeCreds(el); });
+        Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ if(!done.has(el)) processNativeCreds(el); });
+    }
+
     // 2 + 3 + 6: known keys, inline keyword=literal, URLs/IPs across all calcs + custom functions
     Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ processCalcEl(el, null); });
     Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ processCalcEl(el, 'Custom function body'); });
@@ -1053,6 +1428,90 @@ function redactDocument(sourceDoc, cfg){
                 var cat=categFromName(attr.name);
                 el.setAttribute(attr.name,'[REDACTED]'); tally1(cat,1);
                 changes.push({severity:'medium',kind:'Attribute (credential name)',category:cat,location:el.tagName+nm(el),count:1,before:attr.name+'="[REDACTED]"',note:'Attribute name matches a credential keyword'});
+            });
+        });
+    }
+
+    // 8: comment audit, FLAG ONLY. The keyword passes deliberately skip
+    // comments so documentation isn't mangled, which created one leak class:
+    // plain-English credentials ("temp password is hunter2") written into a
+    // script comment or a field comment. Redacting prose is too destructive,
+    // so a finding is raised for manual review and nothing is modified. The
+    // keyword must be followed within a short window by "is", ":" or "=" and
+    // a value-like token, so "set the API key in preferences" stays quiet.
+    if(cfg.commentaudit && credNameRe){
+        var commentLeakRe=new RegExp('(?:'+cfg.credNameKws.join('|')+')[^\\r\\n]{0,30}?(?:\\bis\\b|[:=])[ \\t]*\\S{3,}','i');
+        var auditCommentText=function(txt, whereKind, locEl){
+            splitComments(txt).forEach(function(sp){
+                if(sp.type!=='comment') return;
+                if(!commentLeakRe.test(sp.text)) return;
+                changes.push({severity:'medium',kind:whereKind,category:'credential',location:locationOf(locEl),count:0,before:excerpt(sp.text),note:'A comment mentions a credential next to a value \u2014 nothing was changed, review by hand before sharing'});
+            });
+        };
+        Array.from(root.querySelectorAll('Calculation')).forEach(function(el){ auditCommentText(el.textContent||'', 'Comment mentions a credential', el); });
+        Array.from(root.querySelectorAll('CalcsForCustomFunctions CustomFunction')).forEach(function(el){ auditCommentText(el.textContent||'', 'Comment mentions a credential (custom function)', el); });
+        // DDR field comments live in <Comment> elements or comment attributes.
+        root.querySelectorAll('Comment').forEach(function(el){
+            var t=el.textContent||'';
+            if(commentLeakRe.test(t)) changes.push({severity:'medium',kind:'Field comment mentions a credential',category:'credential',location:locationOf(el),count:0,before:excerpt(t),note:'Nothing was changed \u2014 review by hand before sharing'});
+        });
+    }
+
+    // 9: optional PII pass, OFF by default. Value lists, ExecuteSQL literals
+    // and DDR exports routinely carry real email addresses and, occasionally,
+    // card numbers. Emails are shape-matched; digit runs of 13 to 19 are only
+    // treated as cards when they pass the Luhn check, which keeps FileMaker's
+    // own long internal ids out of the findings. Runs across every text node,
+    // CDATA section and attribute in the document, because personal data is
+    // not confined to calculations the way credentials are.
+    if(cfg.piiemail || cfg.piicard){
+        var emailRe=/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+        // No lookbehind: Safari before 16.4 throws on lookbehind at compile
+        // time, which would kill the whole scan. The leading context char is
+        // captured and re-emitted instead.
+        var cardRe=/(^|[^\d-])((?:\d[ -]?){12,18}\d)(?![\d-])/g;
+        var luhnOk=function(digits){
+            var sum=0, dbl=false;
+            for(var i=digits.length-1;i>=0;i--){
+                var d=digits.charCodeAt(i)-48;
+                if(dbl){ d*=2; if(d>9)d-=9; }
+                sum+=d; dbl=!dbl;
+            }
+            return sum%10===0;
+        };
+        var redactPii=function(s){
+            var n=0, cs=[];
+            if(cfg.piiemail){
+                s=s.replace(emailRe,function(m){ if(m==='[EMAIL]')return m; n++; cs.push('pii'); return '[EMAIL]'; });
+            }
+            if(cfg.piicard){
+                s=s.replace(cardRe,function(m,pre,num){
+                    var digits=num.replace(/[ -]/g,'');
+                    if(digits.length<13||digits.length>19||!luhnOk(digits)) return m;
+                    n++; cs.push('pii'); return pre+'[CARD]';
+                });
+            }
+            return {text:s,count:n,cats:cs};
+        };
+        // Text and CDATA nodes across the whole document. Writing nodeValue
+        // preserves the node type, so calculations stay inside their CDATA.
+        var walker=doc.createTreeWalker(root, 0x4|0x8, null); // SHOW_TEXT | SHOW_CDATA_SECTION
+        var tNode;
+        while((tNode=walker.nextNode())){
+            var val=tNode.nodeValue||''; if(!val.trim()) continue;
+            var rp=redactPii(val);
+            if(rp.count>0){
+                tNode.nodeValue=rp.text; tally1('pii',rp.count);
+                changes.push({severity:'medium',kind:'Personal data',category:'pii',location:locationOf(tNode.parentNode||root),count:rp.count,before:previewRedactions(rp.text),note:'Email address or card number redacted'});
+            }
+        }
+        root.querySelectorAll('*').forEach(function(el){
+            Array.from(el.attributes).forEach(function(attr){
+                var rp=redactPii(attr.value||'');
+                if(rp.count>0){
+                    el.setAttribute(attr.name,rp.text); tally1('pii',rp.count);
+                    changes.push({severity:'medium',kind:'Personal data (attribute)',category:'pii',location:el.tagName+nm(el),count:rp.count,before:previewRedactions(rp.text),note:'Email address or card number in attribute "'+attr.name+'"'});
+                }
             });
         });
     }
@@ -1246,7 +1705,7 @@ function buildConfig(){
         xai:$('pat-xaikey').checked, groq:$('pat-xaikey').checked,
         aws:$('pat-awskey').checked, github:$('pat-ghkey').checked,
         slack:$('pat-slackkey').checked, stripe:$('pat-stripekey').checked,
-        sendgrid:$('pat-sgkey').checked,
+        sendgrid:$('pat-sgkey').checked, otto:$('pat-ottokey').checked,
         pem:$('pat-pemkey').checked, webhook:$('pat-webhook').checked,
         jwt:$('pat-jwtkey').checked
     };
@@ -1264,7 +1723,11 @@ function buildConfig(){
         textnode:$('pat-textnode').checked, connstr:$('pat-connstr').checked,
         plugin:$('pat-plugin').checked, azure:$('pat-connstr').checked,
         pem:$('pat-pemkey').checked, curlcred:$('pat-curlcred').checked,
-        headercred:$('pat-headercred').checked, urlsecret:$('pat-urlsecret').checked
+        headercred:$('pat-headercred').checked, urlsecret:$('pat-urlsecret').checked,
+        jsoncred:$('pat-jsoncred').checked, nativecred:$('pat-nativecred').checked,
+        credtarget:$('pat-credtarget').checked, b64:$('pat-b64').checked,
+        commentaudit:$('pat-commentaudit').checked,
+        piiemail:$('pat-piiemail').checked, piicard:$('pat-piicard').checked
     };
 }
 
@@ -1376,7 +1839,7 @@ function doCopy(){
 function showSummaryOverlay(){
     var s=state.lastSummary; if(!s) return;
     var t=s.tally;
-    var catNames={ api_key:'API keys', token:'Auth tokens', password:'Passwords', secret:'Secrets', smtp:'SMTP credentials', oauth:'OAuth tokens', credential:'Credentials', license:'Plugin licence keys', url:'Hostnames and IPs' };
+    var catNames={ api_key:'API keys', token:'Auth tokens', password:'Passwords', secret:'Secrets', smtp:'SMTP credentials', oauth:'OAuth tokens', credential:'Credentials', license:'Plugin licence keys', url:'Hostnames and IPs', pii:'Personal data' };
     var catRows='';
     Object.keys(catNames).forEach(function(cat){
         var n=t[cat]||0; if(!n) return;
